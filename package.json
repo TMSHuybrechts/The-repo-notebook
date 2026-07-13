@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "node server/index.js --production",
     "mcp": "node mcp/server.js",
-    "app": "electron .",
+    "app": "npm run build && electron .",
     "app:build": "npm run build && electron-builder"
   },
   "build": {
