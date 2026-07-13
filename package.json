@@ -8,6 +8,7 @@
     "dev": "node server/index.js",
     "build": "vite build",
     "preview": "node server/index.js --production",
+    "mcp": "node mcp/server.js",
     "app": "electron .",
     "app:build": "npm run build && electron-builder"
   },
@@ -20,6 +21,7 @@
     "files": [
       "dist/**",
       "server/**",
+      "mcp/**",
       "electron/**",
       "public/**",
       "package.json"

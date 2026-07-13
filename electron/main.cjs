@@ -1,7 +1,7 @@
 // Electron shell for Repo Notebook.
 //
 // Runs the existing Express server (server/index.js) as a background Node
-// process on a free loopback port, then loads it in a native window. The
+// process on a stable loopback port when possible, then loads it in a native window. The
 // server is unchanged apart from honouring RN_DATA_DIR, so all data lives in
 // a stable per-user folder that survives app updates.
 
@@ -20,11 +20,18 @@ const dataDir = path.join(baseDir, "RepoNotebook", "data");
 let serverProc = null;
 let serverPort = 0;
 
-const freePort = () =>
+const freePort = (preferred = 5188) =>
   new Promise((resolve, reject) => {
     const srv = net.createServer();
-    srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
+    srv.once("error", () => {
+      const fallback = net.createServer();
+      fallback.once("error", reject);
+      fallback.listen(0, "127.0.0.1", () => {
+        const { port } = fallback.address();
+        fallback.close(() => resolve(port));
+      });
+    });
+    srv.listen(preferred, "127.0.0.1", () => {
       const { port } = srv.address();
       srv.close(() => resolve(port));
     });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -28,11 +28,12 @@ import {
   Sparkles,
   Square,
   Star,
+  Terminal,
   Trash2,
   Upload,
   X
 } from "lucide-react";
-import { bulkSave, checkUpdates, cloneRepo, deleteClone, importNotebook, importStars, installRepo, loadConfig, loadLog, loadNotebook, loadRuntime, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveRepo, setRepoMeta, startRepo, stopRepo } from "./api";
+import { bulkSave, checkUpdates, clearTerminal, cloneRepo, deleteClone, importNotebook, importStars, installRepo, loadConfig, loadLog, loadMcpStatus, loadNotebook, loadRuntime, loadTerminal, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveRepo, sendTerminalInput, setRepoMeta, startRepo, startTerminal, stopRepo, stopTerminal } from "./api";
 import { fileSize, languageColor, letters, repoLetter, shortDate, shortNumber } from "./format";
 import "./styles.css";
 
@@ -187,6 +188,7 @@ function App() {
   const [trendingError, setTrendingError] = useState("");
   const [config, setConfig] = useState({ ai: false, token: false });
   const [addOpen, setAddOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
 
   useEffect(() => {
     loadNotebook()
@@ -331,7 +333,7 @@ function App() {
 
   return (
     <main className="app">
-      <TopBar busy={busy} error={error} notice={notice} openAdd={() => setAddOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
+      <TopBar busy={busy} error={error} notice={notice} openAdd={() => setAddOpen(true)} openMcp={() => setMcpOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
       <TrendingTicker busy={busy} error={trendingError} onSave={saveTrending} repos={trending} />
       <section className="workspace">
         <LetterRail groups={groups} letter={letter} setLetter={setLetter} />
@@ -375,16 +377,20 @@ function App() {
           setNotice={setNotice}
         />
       )}
+      {mcpOpen && <McpDialog onClose={() => setMcpOpen(false)} />}
     </main>
   );
 }
 
-function TopBar({ busy, error, notice, openAdd, query, save, setQuery, setUrl, url }) {
+function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, setUrl, url }) {
   return (
     <header className="topbar">
       <div className="brand">
         <BookOpen size={24} />
         <span>Repo Notebook</span>
+        <button className="mcp-chip" onClick={openMcp} title="MCP-server en verbindingsinformatie" type="button">
+          <span /> MCP
+        </button>
       </div>
       <form className="save-form" onSubmit={save}>
         <input
@@ -573,6 +579,9 @@ function EmptyList() {
 
 function RepoDetail({ busy, categories, config, onRepoUpdate, openLocal, refresh, remove, repo, setCloneFor }) {
   const [tab, setTab] = useState("readme");
+  const [terminalOpen, setTerminalOpen] = useState(false);
+
+  useEffect(() => setTerminalOpen(false), [repo?.id]);
 
   if (!repo) {
     return (
@@ -607,10 +616,13 @@ function RepoDetail({ busy, categories, config, onRepoUpdate, openLocal, refresh
             <HardDriveDownload size={17} /> Klonen
           </button>
           {repo.localPath && (
-            <button disabled={busy === "open-local"} onClick={openLocal}>
-              {busy === "open-local" ? <Loader2 className="spin" size={16} /> : <FolderOpen size={17} />}
-              Open map
-            </button>
+            <>
+              <button disabled={busy === "open-local"} onClick={openLocal}>
+                {busy === "open-local" ? <Loader2 className="spin" size={16} /> : <FolderOpen size={17} />}
+                Open map
+              </button>
+              <button onClick={() => setTerminalOpen(true)}><Terminal size={17} /> Terminal</button>
+            </>
           )}
           <a href={repo.htmlUrl} rel="noreferrer" target="_blank">
             Open op GitHub <ExternalLink size={16} />
@@ -642,6 +654,7 @@ function RepoDetail({ busy, categories, config, onRepoUpdate, openLocal, refresh
         </div>
         <About repo={repo} />
       </div>
+      {terminalOpen && repo.localPath && <TerminalDock onClose={() => setTerminalOpen(false)} repo={repo} />}
     </section>
   );
 }
@@ -718,6 +731,56 @@ function About({ repo }) {
         </div>
       )}
     </aside>
+  );
+}
+
+function McpDialog({ onClose }) {
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState("");
+
+  useEffect(() => {
+    loadMcpStatus().then(setStatus).catch((err) => setError(err.message));
+  }, []);
+
+  const copy = async (label, value) => {
+    await navigator.clipboard?.writeText(value);
+    setCopied(label);
+    setTimeout(() => setCopied(""), 1800);
+  };
+  const endpoint = status?.endpoint || "";
+  const codexCommand = endpoint ? `codex mcp add repo-notebook --url ${endpoint}` : "";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-label="MCP-server" className="clone-modal mcp-modal" role="dialog">
+        <div className="modal-head">
+          <div>
+            <h2>Repo Notebook MCP</h2>
+            <p>De desktopapp biedt dezelfde notebook-tools aan via Streamable HTTP en STDIO.</p>
+          </div>
+          <button aria-label="Sluit MCP-venster" className="icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        {error && <div className="clone-error">{error}</div>}
+        {!status && !error && <div className="mcp-loading"><Loader2 className="spin" size={18} /> MCP-status laden…</div>}
+        {status && (
+          <>
+            <div className="mcp-status"><CheckCircle2 size={18} /> Actief · lokaal beveiligd · versie {status.version}</div>
+            <label className="mcp-field">
+              <span>Lokale HTTP-endpoint</span>
+              <div><code>{endpoint}</code><button onClick={() => copy("endpoint", endpoint)}>{copied === "endpoint" ? "Gekopieerd" : "Kopieer"}</button></div>
+            </label>
+            <label className="mcp-field">
+              <span>Toevoegen aan lokale Codex</span>
+              <div><code>{codexCommand}</code><button onClick={() => copy("codex", codexCommand)}>{copied === "codex" ? "Gekopieerd" : "Kopieer"}</button></div>
+            </label>
+            <div className="mcp-note">
+              ChatGPT Work kan deze localhost-endpoint gebruiken via een Secure MCP Tunnel. De app stelt hem nooit rechtstreeks aan het internet bloot.
+            </div>
+          </>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -874,6 +937,84 @@ function RuntimePanel({ onRepoUpdate, repo }) {
         {runtime?.log && <pre className="runtime-log">{runtime.log}</pre>}
       </div>
     </section>
+  );
+}
+
+function TerminalDock({ onClose, repo }) {
+  const [terminal, setTerminal] = useState(null);
+  const [command, setCommand] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const outputRef = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    setTerminal(null);
+    setCommand("");
+    setError("");
+    const refresh = () => loadTerminal(repo).then((data) => active && setTerminal(data)).catch(() => {});
+    loadTerminal(repo)
+      .then((data) => data.running ? data : startTerminal(repo))
+      .then((data) => active && setTerminal(data))
+      .catch((err) => active && setError(err.message));
+    const timer = setInterval(refresh, 900);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [repo.id]);
+
+  useEffect(() => {
+    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [terminal?.output]);
+
+  const act = async (name, fn) => {
+    setBusy(name);
+    setError("");
+    try {
+      setTerminal(await fn());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const input = command.trim();
+    if (!input) return;
+    setCommand("");
+    await act("input", () => sendTerminalInput(repo, input));
+  };
+
+  return (
+    <aside className="terminal-dock" aria-label={`Terminal voor ${repo.fullName}`}>
+      <div className="terminal-head">
+        <span><Terminal size={16} /> Terminal <small>{repo.fullName}</small></span>
+        <div>
+          {terminal?.running ? (
+            <button disabled={busy === "stop"} onClick={() => act("stop", () => stopTerminal(repo))}><Square size={14} /> Stop</button>
+          ) : (
+            <button disabled={busy === "start"} onClick={() => act("start", () => startTerminal(repo))}><Play size={14} /> Open terminal</button>
+          )}
+          <button disabled={!terminal?.output || busy === "clear"} onClick={() => act("clear", () => clearTerminal(repo))}>Wis</button>
+          <button aria-label="Terminal sluiten" className="icon" onClick={onClose}><X size={15} /></button>
+        </div>
+      </div>
+      {(terminal?.output || terminal?.running) && (
+        <>
+          <pre className="terminal-output" ref={outputRef}>{terminal?.output || "Terminal gestart…"}</pre>
+          <form className="terminal-input" onSubmit={submit}>
+            <span>$</span>
+            <input autoComplete="off" disabled={!terminal?.running || busy === "input"} onChange={(event) => setCommand(event.target.value)} placeholder={terminal?.running ? "Typ een commando en druk Enter" : "Terminal is gestopt"} spellCheck="false" value={command} />
+            <button disabled={!terminal?.running || !command.trim() || busy === "input"}>Uitvoeren</button>
+          </form>
+        </>
+      )}
+      {error && <div className="runtime-error">{error}</div>}
+      <small className="terminal-warning">Commando’s draaien lokaal in de clone-map. Voer alleen code uit die je vertrouwt.</small>
+    </aside>
   );
 }
 

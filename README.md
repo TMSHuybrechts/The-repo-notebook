@@ -29,7 +29,24 @@ If the repository is already present there, Repo Notebook reports the existing p
 
 After cloning, **Open map** opens the local clone folder on your system.
 
+Each cloned repository also gets a **Terminal** action that opens an embedded bottom drawer.
+On Windows it uses PowerShell; on macOS/Linux it uses the user's shell. The
+terminal starts in that repository's clone folder and stays local to Repo
+Notebook.
+
 For recognized Node and Python repositories, the local panel can also run detected install/start commands such as `npm install`, `npm run dev`, or `pip install -r requirements.txt`. Runtime logs are stored under `data/runs/`.
+
+## MCP
+
+Repo Notebook exposes its tools in two ways:
+
+- Streamable HTTP at `http://127.0.0.1:5188/mcp` while the desktop app is running.
+- STDIO with `npm run mcp` from a source checkout.
+
+Use the **MCP** button in the app to see the live endpoint and copy the Codex
+registration command. The endpoint binds to loopback only. To use it from
+ChatGPT Work, connect it through OpenAI Secure MCP Tunnel instead of exposing
+the port publicly.
 
 ## Optional GitHub Token
 

@@ -79,6 +79,23 @@ a {
   color: var(--text);
 }
 
+.mcp-chip {
+  background: rgba(79, 209, 165, 0.08);
+  border-color: rgba(79, 209, 165, 0.28);
+  color: #b8f2d4;
+  font-size: 11px;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.mcp-chip > span {
+  background: #4fd1a5;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(79, 209, 165, 0.6);
+  height: 7px;
+  width: 7px;
+}
+
 .save-form,
 .search {
   align-items: center;
@@ -646,6 +663,109 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.terminal-dock {
+  backdrop-filter: blur(18px);
+  background: rgba(7, 12, 19, 0.98);
+  border: 1px solid #38516d;
+  border-radius: 10px;
+  bottom: 16px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.62);
+  display: grid;
+  gap: 10px;
+  left: 86px;
+  max-height: min(480px, calc(100vh - 120px));
+  padding: 13px;
+  position: fixed;
+  right: 18px;
+  z-index: 45;
+}
+
+.terminal-head,
+.terminal-head > span,
+.terminal-head > div {
+  align-items: center;
+  display: flex;
+}
+
+.terminal-head {
+  justify-content: space-between;
+}
+
+.terminal-head > span {
+  font-size: 14px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.terminal-head > span small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.terminal-head > div {
+  gap: 7px;
+}
+
+.terminal-head button {
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.terminal-output {
+  background: #03070c;
+  border: 1px solid #263241;
+  border-radius: 7px 7px 0 0;
+  color: #c9f7d1;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  min-height: 160px;
+  max-height: min(300px, calc(100vh - 260px));
+  overflow: auto;
+  padding: 13px;
+  white-space: pre-wrap;
+}
+
+.terminal-input {
+  align-items: center;
+  background: #070c13;
+  border: 1px solid #263241;
+  border-radius: 0 0 7px 7px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  margin-top: -10px;
+  padding: 8px 9px;
+}
+
+.terminal-input > span {
+  color: #4fd1a5;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-weight: 900;
+}
+
+.terminal-input input {
+  background: transparent;
+  border: 0;
+  color: #e8eef7;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  min-width: 0;
+  outline: none;
+  padding: 7px 4px;
+}
+
+.terminal-input button {
+  min-height: 31px;
+}
+
+.terminal-warning {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .topics {
   display: flex;
   flex-wrap: wrap;
@@ -949,6 +1069,67 @@ button:disabled {
 
 .clone-run {
   height: 42px;
+}
+
+.mcp-modal {
+  max-width: 760px;
+  width: min(760px, 100%);
+}
+
+.mcp-loading,
+.mcp-status {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.mcp-loading {
+  color: var(--muted);
+}
+
+.mcp-status {
+  background: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.35);
+  border-radius: 7px;
+  color: #b8f2c0;
+  padding: 11px 12px;
+}
+
+.mcp-field {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.mcp-field > div {
+  align-items: center;
+  background: #070c13;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 9px;
+}
+
+.mcp-field code {
+  color: #dce8f7;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  overflow: auto;
+  white-space: nowrap;
+}
+
+.mcp-note {
+  background: rgba(47, 129, 247, 0.09);
+  border: 1px solid rgba(47, 129, 247, 0.28);
+  border-radius: 7px;
+  color: #c9dcf5;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px;
 }
 
 .clone-result,

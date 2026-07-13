@@ -5,7 +5,8 @@
 // SAME data dir (%LOCALAPPDATA%\RepoNotebook), so the app and this server stay
 // in sync — save a repo here and it shows up in the app, and vice versa.
 //
-// Transport: stdio. Register via `.mcp.json` or `claude mcp add`.
+// Transports: STDIO when run directly, Streamable HTTP when imported by the
+// Repo Notebook desktop server.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -13,6 +14,7 @@ import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const baseDir =
   process.env.RN_DATA_DIR ||
@@ -192,7 +194,8 @@ const searchRepos = async (query) => {
 
 const text = (value) => ({ content: [{ type: "text", text: value }] });
 
-const server = new McpServer({ name: "repo-notebook", version: "0.1.0" });
+export const createRepoNotebookMcpServer = () => {
+const server = new McpServer({ name: "repo-notebook", version: "0.2.0" });
 
 server.tool(
   "list_saved_repos",
@@ -371,5 +374,15 @@ server.tool(
   }
 );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+return server;
+};
+
+// Keep the original STDIO entry point for Codex CLI, Claude Code and IDE
+// clients. The desktop app imports the factory above and exposes the same
+// tools over Streamable HTTP at /mcp.
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const server = createRepoNotebookMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
