@@ -5,7 +5,7 @@
 // server is unchanged apart from honouring RN_DATA_DIR, so all data lives in
 // a stable per-user folder that survives app updates.
 
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, dialog, shell } = require("electron");
 const path = require("node:path");
 const http = require("node:http");
 const net = require("node:net");
@@ -54,14 +54,26 @@ const seedData = () => {
   }
 };
 
-const waitForServer = (port) =>
-  new Promise((resolve) => {
+const waitForServer = (port, proc) =>
+  new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const attempt = () => {
+      if (!proc || proc.exitCode !== null) {
+        reject(new Error("De lokale Repo Notebook-server is onverwacht gestopt."));
+        return;
+      }
+      if (Date.now() - startedAt > 30000) {
+        reject(new Error("De lokale Repo Notebook-server antwoordde niet binnen 30 seconden."));
+        return;
+      }
       const req = http.get(
         { host: "127.0.0.1", port, path: "/api/notebook", timeout: 800 },
         (res) => {
           res.resume();
-          resolve();
+          res.once("end", () => {
+            if (res.statusCode >= 200 && res.statusCode < 400) resolve();
+            else setTimeout(attempt, 250);
+          });
         }
       );
       req.on("error", () => setTimeout(attempt, 250));
@@ -75,6 +87,8 @@ const waitForServer = (port) =>
 
 const startServer = async () => {
   serverPort = await freePort();
+  fs.mkdirSync(dataDir, { recursive: true });
+  const serverLog = fs.openSync(path.join(dataDir, "server.log"), "a");
   serverProc = spawn(process.execPath, [path.join(appRoot, "server", "index.js"), "--production"], {
     cwd: appRoot,
     env: {
@@ -84,16 +98,18 @@ const startServer = async () => {
       RN_DATA_DIR: dataDir,
       PORT: String(serverPort)
     },
-    stdio: "ignore",
+    stdio: ["ignore", serverLog, serverLog],
     windowsHide: true
   });
+  serverProc.once("error", (error) => console.error("Repo Notebook server spawn failed:", error));
   serverProc.on("exit", () => {
     serverProc = null;
+    try { fs.closeSync(serverLog); } catch { /* already closed */ }
   });
-  await waitForServer(serverPort);
+  await waitForServer(serverPort, serverProc);
 };
 
-const createWindow = () => {
+const createWindow = async () => {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -115,7 +131,18 @@ const createWindow = () => {
     return { action: "deny" };
   });
 
-  win.loadURL(`http://127.0.0.1:${serverPort}/`);
+  const url = `http://127.0.0.1:${serverPort}/`;
+  let lastError;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      await win.loadURL(url);
+      return win;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+  }
+  throw lastError || new Error("Repo Notebook kon de lokale interface niet laden.");
 };
 
 const killServer = () => {
@@ -137,12 +164,18 @@ app.whenReady().then(async () => {
   seedData();
   try {
     await startServer();
+    await createWindow();
   } catch (err) {
     console.error("Failed to start Repo Notebook server:", err);
+    dialog.showErrorBox(
+      "Repo Notebook kon niet starten",
+      `${err.message}\n\nLogbestand: ${path.join(dataDir, "server.log")}`
+    );
+    app.quit();
+    return;
   }
-  createWindow();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow().catch(console.error);
   });
 });
 
