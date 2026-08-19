@@ -1,0 +1,24 @@
+{
+  "name": "repo-notebook-obsidian",
+  "version": "0.1.0",
+  "description": "Repo Notebook inside Obsidian: every saved GitHub repo becomes a note, the knowledge-graph links become wikilinks, and clone/install/start stay one command away.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "node scripts/test.mjs",
+    "install:vault": "node scripts/install-vault.mjs"
+  },
+  "keywords": ["obsidian", "obsidian-plugin", "github", "repo-notebook"],
+  "author": "Thomas Huybrechts",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.2",
+    "obsidian": "latest",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.2"
+  }
+}

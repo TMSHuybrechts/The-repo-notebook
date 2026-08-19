@@ -1,9 +1,10 @@
 import express from "express";
 import fs from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { buildGraph } from "./graph.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -29,7 +30,10 @@ const app = express();
 //   * Origin check     → blocks cross-site CSRF POSTs (browsers attach Origin
 //     to cross-origin state-changing requests; same-origin/no-origin pass).
 const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
-const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+// app://obsidian.md = the Obsidian plugin (obsidian-plugin/). A plugin already
+// has full Node access on this machine, so allowing its origin adds no new
+// exposure — it only lets the plugin's POSTs pass the CSRF check.
+const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`, "app://obsidian.md"]);
 app.use((req, res, next) => {
   if (!allowedHosts.has(req.headers.host)) {
     return res.status(403).json({ error: "Forbidden host." });
@@ -291,6 +295,22 @@ const detectRuntime = async (target) => {
     };
   }
 
+  // Python installs go into a venv inside the clone — never the global
+  // site-packages, so a repo can't pollute or break the system Python.
+  const venvPy = process.platform === "win32"
+    ? path.join(target, ".venv", "Scripts", "python.exe")
+    : path.join(target, ".venv", "bin", "python");
+  const pythonPlan = async (installArgs, installLabel) => {
+    const hasVenv = await fileExists(venvPy);
+    const steps = [];
+    if (!hasVenv) steps.push({ cmd: "python", args: ["-m", "venv", ".venv"], label: "python -m venv .venv" });
+    steps.push({ cmd: venvPy, args: ["-m", "pip", "install", ...installArgs], label: `(.venv) pip install ${installLabel}` });
+    return {
+      hasVenv,
+      install: { steps, label: hasVenv ? `(.venv) pip install ${installLabel}` : `venv aanmaken + pip install ${installLabel}` }
+    };
+  };
+
   if (await fileExists(path.join(target, "requirements.txt"))) {
     const pyEntry = await fileExists(path.join(target, "main.py"))
       ? "main.py"
@@ -299,17 +319,23 @@ const detectRuntime = async (target) => {
         : await fileExists(path.join(target, "server.py"))
           ? "server.py"
           : "";
+    const plan = await pythonPlan(["-r", "requirements.txt"], "-r requirements.txt");
     return {
       type: "Python",
-      install: { cmd: "python", args: ["-m", "pip", "install", "-r", "requirements.txt"], label: "pip install -r requirements.txt" },
-      start: pyEntry ? { cmd: "python", args: [pyEntry], label: `python ${pyEntry}` } : null
+      install: plan.install,
+      start: pyEntry
+        ? plan.hasVenv
+          ? { cmd: venvPy, args: [pyEntry], label: `(.venv) python ${pyEntry}` }
+          : { cmd: "python", args: [pyEntry], label: `python ${pyEntry}` }
+        : null
     };
   }
 
   if (await fileExists(path.join(target, "pyproject.toml"))) {
+    const plan = await pythonPlan(["-e", "."], "-e .");
     return {
       type: "Python",
-      install: { cmd: "python", args: ["-m", "pip", "install", "-e", "."], label: "pip install -e ." },
+      install: plan.install,
       start: null
     };
   }
@@ -367,19 +393,23 @@ const runtimeFor = async (repo) => {
     pid: run?.child.pid || null,
     startedAt: run?.startedAt || "",
     url: run?.url || "",
+    mode: run?.mode || "",
     log: await tailLog(repo)
   };
 };
 
-const runGit = (args, cwd = root) =>
+const runGit = (args, cwd = root, timeoutMs = 300000) =>
   new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd, shell: false });
+    // Nooit om credentials vragen: een fetch op een verwijderde/private repo
+    // moet snel falen, niet blijven hangen op een onzichtbare prompt.
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_ASKPASS: "" };
+    const child = spawn("git", args, { cwd, shell: false, env });
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
-      reject(new Error("git timed out after 5 minutes."));
-    }, 300000);
+      reject(new Error(`git timed out after ${Math.round(timeoutMs / 1000)}s.`));
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       out += chunk.toString();
@@ -441,7 +471,7 @@ const runCommand = async (repo, target, command, timeoutMs = 900000) => {
   });
 };
 
-const startCommand = async (repo, target, command) => {
+const startCommand = async (repo, target, command, opts = {}) => {
   await appendLog(repo, `\n\n$ ${command.label}\n`);
   const spec = commandSpec(command.cmd, command.args);
   let child;
@@ -452,15 +482,24 @@ const startCommand = async (repo, target, command) => {
     throw error;
   }
   const startedAt = new Date().toISOString();
-  const entry = { child, startedAt, command, url: "" };
+  const entry = { child, startedAt, command, url: "", mode: opts.mode || "", containerName: opts.containerName || "" };
   running.set(repo.id, entry);
 
   // Sniff the child's output for the dev-server URL so the UI can offer
-  // "Open in browser" without you hunting for the port.
+  // "Open in browser" without you hunting for the port. The port is also
+  // remembered on the repo record so the port guard can warn next time.
   const detectUrl = (text) => {
     if (entry.url) return;
     const match = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s"'`)]*/i);
-    if (match) entry.url = match[0].replace("0.0.0.0", "localhost");
+    if (!match) return;
+    entry.url = match[0].replace("0.0.0.0", "localhost");
+    try {
+      const parsed = new URL(entry.url);
+      entry.port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    } catch {
+      entry.port = "";
+    }
+    patchRepo(repo, { lastUrl: entry.url, lastPort: entry.port }).catch(() => {});
   };
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString();
@@ -490,6 +529,25 @@ const openPath = (target) => {
 
 app.get("/api/notebook", async (_req, res) => {
   res.json(await readStore());
+});
+
+// --- Knowledge graph over the saved repos. Recomputed only when a repo is
+// added/removed/refreshed or its category changes (readme tokenizing is the
+// expensive part, so key the cache on exactly what feeds the graph). ---
+// key starts null (not "") so an empty store — whose real key is "" — still
+// differs from the initial state and gets built instead of returning null.
+let graphCache = { key: null, graph: null };
+app.get("/api/graph", async (_req, res) => {
+  try {
+    const store = await readStore();
+    const key = store.repos.map((r) => `${r.id}|${r.fetchedAt}|${r.category || ""}`).join(";");
+    if (graphCache.key !== key) {
+      graphCache = { key, graph: buildGraph(store.repos) };
+    }
+    res.json(graphCache.graph);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.get("/api/trending", async (_req, res) => {
@@ -535,6 +593,15 @@ app.post("/api/notebook/:owner/:repo/meta", async (req, res) => {
     if (typeof body.status === "string") {
       if (!ALLOWED_STATUS.has(body.status)) return res.status(400).json({ error: "Invalid status." });
       patch.status = body.status;
+    }
+    if (typeof body.containerMode === "boolean") patch.containerMode = body.containerMode;
+    if (typeof body.containerGpu === "boolean") patch.containerGpu = body.containerGpu;
+    if (typeof body.containerPort === "string") {
+      const port = body.containerPort.trim();
+      if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
+        return res.status(400).json({ error: "Ongeldige poort." });
+      }
+      patch.containerPort = port;
     }
     if (!Object.keys(patch).length) return res.status(400).json({ error: "No category, status or note provided." });
 
@@ -597,6 +664,243 @@ app.post("/api/notebook/:owner/:repo/open-local", async (req, res) => {
   }
 });
 
+// --- Docker: containermodus per repo. Docker Desktop wordt on-demand
+// gestart (Thomas houdt hem bewust uit voor RAM) en kan vanuit de app weer
+// afgesloten worden zodra er geen rn-containers meer draaien. ---
+const DOCKER_DESKTOP_EXE = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+const CONTAINER_IMAGES = { Node: "node:22", Python: "python:3.12", Go: "golang:1.23", Rust: "rust:1" };
+
+const containerName = (repo) => `rn-${safeName(repo.owner)}-${safeName(repo.name)}`.toLowerCase();
+
+const runQuick = (cmd, args, timeoutMs = 10000) =>
+  new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { shell: false });
+    } catch {
+      return resolve({ ok: false, out: "" });
+    }
+    let out = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve({ ok: false, out });
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => (out += chunk.toString()));
+    child.stderr.on("data", (chunk) => (out += chunk.toString()));
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve({ ok: false, out });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: code === 0, out });
+    });
+  });
+
+const dockerStatus = async () => {
+  const version = await runQuick("docker", ["--version"], 6000);
+  if (!version.ok) return { installed: false, running: false };
+  const info = await runQuick("docker", ["info", "--format", "{{.ServerVersion}}"], 6000);
+  return { installed: true, running: info.ok && Boolean(info.out.trim()), version: info.ok ? info.out.trim() : "" };
+};
+
+const runningContainers = () =>
+  [...running.values()].filter((entry) => entry.mode === "container").length;
+
+app.get("/api/docker", async (_req, res) => res.json(await dockerStatus()));
+
+app.post("/api/docker/start", async (_req, res) => {
+  try {
+    const status = await dockerStatus();
+    if (!status.installed) return res.status(400).json({ error: "Docker Desktop is niet geïnstalleerd." });
+    if (status.running) return res.json({ ...status, started: false });
+
+    const child = spawn(DOCKER_DESKTOP_EXE, [], { detached: true, shell: false, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+    // Poll tot de daemon antwoordt (image-engine opstarten duurt 20-60s).
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const check = await dockerStatus();
+      if (check.running) return res.json({ ...check, started: true });
+    }
+    res.status(400).json({ error: "Docker-daemon kwam niet online binnen 90s. Kijk of Docker Desktop opstart." });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/docker/stop", async (_req, res) => {
+  try {
+    if (runningContainers() > 0) {
+      return res.status(400).json({ error: "Er draaien nog containers vanuit Repo Notebook — stop die eerst." });
+    }
+    spawn("taskkill.exe", ["/IM", "Docker Desktop.exe", "/F"], { shell: false }).on("error", () => {});
+    // WSL-backend meteen afbouwen, anders blijft de RAM bezet.
+    setTimeout(() => {
+      spawn("wsl.exe", ["--terminate", "docker-desktop"], { shell: false }).on("error", () => {});
+    }, 2000);
+    res.json({ stopped: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Bouw het docker-run-plan voor een repo: install + start gebeuren BINNEN de
+// container (install is het echte risicomoment). Named volumes houden
+// node_modules/pip-cache gescheiden van de host én versnellen herstarts.
+const containerPlan = async (repo, target) => {
+  const commands = await detectRuntime(target);
+  if (commands.type === "Docker Compose") {
+    return { command: { cmd: "docker", args: ["compose", "up"], label: "docker compose up" } };
+  }
+  const image = CONTAINER_IMAGES[commands.type];
+  if (!image) return { error: `Containermodus ondersteunt nog geen ${commands.type}-repos.` };
+
+  const name = containerName(repo);
+  const port = String(repo.containerPort || repo.lastPort || "").trim();
+  const inner = [];
+  if (commands.type === "Node") {
+    const script = commands.start?.label?.replace(/^npm /, "") || "";
+    if (!script) return { error: "Geen startcommando gedetecteerd." };
+    inner.push("npm install", `npm ${script}`);
+  } else if (commands.type === "Python") {
+    const hasReq = await fileExists(path.join(target, "requirements.txt"));
+    inner.push(hasReq ? "pip install -r requirements.txt" : "pip install -e .");
+    const entry = commands.start?.args?.[commands.start.args.length - 1];
+    if (!entry || !/\.py$/.test(entry)) return { error: "Geen Python-startbestand (main/app/server.py) gevonden." };
+    inner.push(`python ${entry}`);
+  } else if (commands.type === "Go") {
+    inner.push("go run .");
+  } else if (commands.type === "Rust") {
+    inner.push("cargo run");
+  }
+
+  const args = ["run", "--rm", "--name", name, "-v", `${target}:/app`, "-w", "/app", "-e", "HOST=0.0.0.0"];
+  if (commands.type === "Node") args.push("-v", `${name}-modules:/app/node_modules`);
+  if (commands.type === "Python") args.push("-v", `${name}-pip:/root/.cache/pip`);
+  if (/^\d+$/.test(port) && Number(port) > 0 && Number(port) < 65536) args.push("-p", `${port}:${port}`);
+  if (repo.containerGpu) args.push("--gpus", "all");
+  args.push(image, "sh", "-c", inner.join(" && "));
+  return { command: { cmd: "docker", args, label: `docker run ${image} (${inner.join(" && ")})` }, name };
+};
+
+app.post("/api/notebook/:owner/:repo/start-container", async (req, res) => {
+  try {
+    const store = await readStore();
+    const repo = findRepo(store, req.params.owner, req.params.repo);
+    if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
+    if (running.has(repo.id)) return res.json({ status: "running", runtime: await runtimeFor(repo) });
+    const target = cloneTarget(repo);
+    if (!(await fileExists(target))) return res.status(404).json({ error: "Repository is not cloned yet." });
+
+    const docker = await dockerStatus();
+    if (!docker.installed) return res.status(400).json({ error: "Docker Desktop is niet geïnstalleerd." });
+    if (!docker.running) return res.status(400).json({ error: "Docker draait niet.", needsDocker: true });
+
+    const plan = await containerPlan(repo, target);
+    if (plan.error) return res.status(400).json({ error: plan.error });
+
+    // Restje van een vorige run met dezelfde naam opruimen (best effort).
+    if (plan.name) await runQuick("docker", ["rm", "-f", plan.name], 8000);
+
+    const started = await startCommand(repo, target, plan.command, { mode: "container", containerName: plan.name });
+    const updated = await patchRepo(repo, { lastStartCommand: plan.command.label, lastStartedAt: started.startedAt });
+    res.json({ status: "started", pid: started.pid, repo: updated, runtime: await runtimeFor(updated) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- .env per repo: lezen/schrijven in de clone-map, met .env.example als
+// template. Pad ligt vast op <clone>/.env — geen traversal mogelijk. ---
+const ENV_MAX_BYTES = 100000;
+const ENV_EXAMPLE_NAMES = [".env.example", ".env.sample", ".env.template", "env.example"];
+
+app.get("/api/notebook/:owner/:repo/env", async (req, res) => {
+  try {
+    const store = await readStore();
+    const repo = findRepo(store, req.params.owner, req.params.repo);
+    if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
+    const target = cloneTarget(repo);
+    if (!(await fileExists(target))) return res.status(404).json({ error: "Repository is not cloned yet." });
+
+    const content = await fs.readFile(path.join(target, ".env"), "utf8").catch(() => null);
+    let example = null;
+    for (const name of ENV_EXAMPLE_NAMES) {
+      const text = await fs.readFile(path.join(target, name), "utf8").catch(() => null);
+      if (text !== null) {
+        example = { name, content: text.slice(0, ENV_MAX_BYTES) };
+        break;
+      }
+    }
+    res.json({ exists: content !== null, content: content || "", example });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/notebook/:owner/:repo/env", async (req, res) => {
+  try {
+    const store = await readStore();
+    const repo = findRepo(store, req.params.owner, req.params.repo);
+    if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
+    const target = cloneTarget(repo);
+    if (!(await fileExists(target))) return res.status(404).json({ error: "Repository is not cloned yet." });
+
+    const content = req.body?.content;
+    if (typeof content !== "string") return res.status(400).json({ error: "content (string) is verplicht." });
+    if (Buffer.byteLength(content, "utf8") > ENV_MAX_BYTES) return res.status(400).json({ error: ".env is te groot (max 100 KB)." });
+    await fs.writeFile(path.join(target, ".env"), content, "utf8");
+    res.json({ saved: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Bulk overzicht voor de Snelstart-tab: alle clones, wat draait waar. ---
+app.get("/api/runtimes", async (_req, res) => {
+  try {
+    const store = await readStore();
+    const items = [];
+    for (const repo of store.repos) {
+      const target = cloneTarget(repo);
+      if (!(await fileExists(target))) continue;
+      const commands = await detectRuntime(target);
+      const run = running.get(repo.id);
+      items.push({
+        id: repo.id,
+        owner: repo.owner,
+        name: repo.name,
+        fullName: repo.fullName,
+        language: repo.language || "",
+        category: repo.category || "",
+        status: repo.status || "",
+        localPath: target,
+        type: commands.type,
+        canStart: Boolean(commands.start),
+        startLabel: commands.start?.label || "",
+        installLabel: commands.install?.label || "",
+        installStatus: repo.installStatus || "",
+        installedAt: repo.installedAt || "",
+        running: Boolean(run),
+        pid: run?.child.pid || null,
+        startedAt: run?.startedAt || "",
+        url: run?.url || "",
+        port: run?.port || "",
+        mode: run?.mode || "",
+        lastPort: repo.lastPort || "",
+        lastUrl: repo.lastUrl || "",
+        containerMode: Boolean(repo.containerMode)
+      });
+    }
+    items.sort((a, b) => Number(b.running) - Number(a.running) || a.name.localeCompare(b.name));
+    res.json({ items });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 app.get("/api/notebook/:owner/:repo/runtime", async (req, res) => {
   try {
     const store = await readStore();
@@ -629,7 +933,9 @@ app.post("/api/notebook/:owner/:repo/install", async (req, res) => {
 
     const commands = await detectRuntime(target);
     if (!commands.install) return res.status(400).json({ error: "No install command detected." });
-    await runCommand(repo, target, commands.install);
+    for (const step of commands.install.steps || [commands.install]) {
+      await runCommand(repo, target, step);
+    }
     const updated = await patchRepo(repo, { installStatus: "installed", installedAt: new Date().toISOString() });
     res.json({ status: "installed", repo: updated, runtime: await runtimeFor(updated) });
   } catch (error) {
@@ -649,9 +955,21 @@ app.post("/api/notebook/:owner/:repo/start", async (req, res) => {
     const commands = await detectRuntime(target);
     if (!commands.start) return res.status(400).json({ error: "No start command detected." });
 
+    // Port guard: warn (niet blokkeren) als een andere draaiende repo de
+    // laatst bekende poort van deze repo al bezet.
+    let portWarning = "";
+    if (repo.lastPort) {
+      for (const [otherId, run] of running) {
+        if (otherId !== repo.id && run.port && run.port === repo.lastPort) {
+          const other = store.repos.find((item) => item.id === otherId);
+          portWarning = `Let op: poort ${repo.lastPort} is al in gebruik door ${other?.fullName || otherId} — deze start pakt mogelijk een andere poort of faalt.`;
+        }
+      }
+    }
+
     const started = await startCommand(repo, target, commands.start);
     const updated = await patchRepo(repo, { lastStartCommand: commands.start.label, lastStartedAt: started.startedAt });
-    res.json({ status: "started", pid: started.pid, repo: updated, runtime: await runtimeFor(updated) });
+    res.json({ status: "started", pid: started.pid, portWarning, repo: updated, runtime: await runtimeFor(updated) });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -665,6 +983,11 @@ app.post("/api/notebook/:owner/:repo/stop", async (req, res) => {
     const run = running.get(repo.id);
     if (!run) return res.json({ status: "stopped", runtime: await runtimeFor(repo) });
 
+    // Container: de docker-client killen stopt de container niet — netjes
+    // docker stop sturen (de --rm ruimt hem daarna zelf op).
+    if (run.mode === "container" && run.containerName) {
+      await runQuick("docker", ["stop", "-t", "5", run.containerName], 20000);
+    }
     if (process.platform === "win32") {
       spawn("taskkill.exe", ["/PID", String(run.child.pid), "/T", "/F"], { shell: false });
     } else {
@@ -887,9 +1210,87 @@ app.get("/api/notebook/:owner/:repo/updates", async (req, res) => {
     if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
     const target = cloneTarget(repo);
     if (!(await fileExists(target))) return res.json({ cloned: false, behind: 0 });
-    await runGit(["fetch", "--quiet"], target).catch(() => {});
+    await runGit(["-c", "credential.helper=", "-c", "credential.interactive=false", "fetch", "--quiet"], target, 30000).catch(() => {});
     const { out } = await runGit(["rev-list", "--count", "HEAD..@{u}"], target).catch(() => ({ out: "0" }));
     res.json({ cloned: true, behind: parseInt(String(out).trim(), 10) || 0 });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Eén klik: alle clones fetchen en tellen wie achterloopt (cap 4 parallel). ---
+app.get("/api/updates-all", async (_req, res) => {
+  try {
+    const store = await readStore();
+    const cloned = [];
+    for (const repo of store.repos) {
+      const target = cloneTarget(repo);
+      if (await fileExists(target)) cloned.push({ repo, target });
+    }
+    const results = [];
+    let index = 0;
+    const worker = async () => {
+      while (index < cloned.length) {
+        const item = cloned[index++];
+        try {
+          // 30s per fetch: één corrupte of tergend trage clone mag de rest
+          // niet ophouden (fetch is normaal 1-2s).
+          await runGit(["-c", "credential.helper=", "-c", "credential.interactive=false", "fetch", "--quiet"], item.target, 30000);
+          const { out } = await runGit(["rev-list", "--count", "HEAD..@{u}"], item.target, 15000).catch(() => ({ out: "0" }));
+          results.push({ id: item.repo.id, behind: parseInt(String(out).trim(), 10) || 0 });
+        } catch (error) {
+          results.push({ id: item.repo.id, behind: 0, error: error.message.slice(0, 120) });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, cloned.length) }, worker));
+    res.json({ items: results, checkedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Dubbel-detectie: staat een opgeslagen repo óók ergens anders gekloond
+// (bv. via repoget in D:\PROJECTS\GITHUB_REPOS)? Match op de remote-URL in
+// .git/config, met mapnaam als fallback. Cache 10 min. ---
+const extraCloneDirs = () =>
+  (process.env.RN_EXTRA_CLONE_DIRS || "D:\\PROJECTS\\GITHUB_REPOS")
+    .split(";")
+    .map((dir) => dir.trim())
+    .filter(Boolean);
+
+let externalCloneCache = { at: 0, map: null };
+const scanExternalClones = async () => {
+  if (externalCloneCache.map && Date.now() - externalCloneCache.at < 600000) return externalCloneCache.map;
+  const map = new Map();
+  for (const dir of extraCloneDirs()) {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const repoPath = path.join(dir, entry.name);
+      const config = await fs.readFile(path.join(repoPath, ".git", "config"), "utf8").catch(() => "");
+      const match = config.match(/github\.com[:/]([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)/);
+      if (match) {
+        map.set(`${match[1]}/${match[2].replace(/\.git$/i, "")}`.toLowerCase(), repoPath);
+      } else {
+        map.set(`*/${entry.name.toLowerCase()}`, repoPath);
+      }
+    }
+  }
+  externalCloneCache = { at: Date.now(), map };
+  return map;
+};
+
+app.get("/api/duplicates", async (_req, res) => {
+  try {
+    const store = await readStore();
+    const map = await scanExternalClones();
+    const items = [];
+    for (const repo of store.repos) {
+      const hit = map.get(repo.id) || map.get(`*/${repo.name.toLowerCase()}`);
+      if (hit) items.push({ id: repo.id, path: hit });
+    }
+    res.json({ items, dirs: extraCloneDirs() });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -993,6 +1394,56 @@ app.post("/api/notebook/:owner/:repo/verdict", async (req, res) => {
   }
 });
 
+// --- Bulk-AI: werk alle repos zonder oordeel af, sequentieel via de lokale
+// provider (Ollama gratis). Achtergrondjob; GET geeft de voortgang. Stopt
+// zichzelf na 5 fouten op rij zodat een platte provider geen 60 fouten stapelt. ---
+let bulkVerdict = { running: false, total: 0, done: 0, current: "", errors: [], provider: "", startedAt: "" };
+
+app.get("/api/verdicts/bulk", (_req, res) => res.json(bulkVerdict));
+
+app.post("/api/verdicts/bulk", async (req, res) => {
+  try {
+    if (bulkVerdict.running) return res.json(bulkVerdict);
+    const store = await readStore();
+    const missing = store.repos.filter((repo) => !repo.aiVerdict);
+    if (!missing.length) return res.json({ ...bulkVerdict, running: false, total: 0, done: 0 });
+    const ai = await resolveAi();
+    if (!ai.available) return res.status(400).json({ error: "Geen AI beschikbaar — start Ollama of zet een API-key." });
+    // Bulk = tientallen calls. Standaard enkel via de gratis lokale Ollama;
+    // een betalende key gebruiken moet een bewuste keuze zijn (force: true).
+    if (ai.provider !== "ollama" && !req.body?.force) {
+      return res.status(400).json({ error: `Bulk zou nu via ${ai.provider} lopen (betalend). Start Ollama voor gratis lokale oordelen, of forceer bewust.`, needsForce: true });
+    }
+
+    bulkVerdict = { running: true, total: missing.length, done: 0, current: "", errors: [], provider: ai.provider, startedAt: new Date().toISOString() };
+    (async () => {
+      let consecutiveErrors = 0;
+      for (const repo of missing) {
+        bulkVerdict.current = repo.fullName;
+        try {
+          const result = await callAi(buildVerdictPrompt(repo));
+          if (!result.available) throw new Error("AI-provider weggevallen");
+          await patchRepo(repo, { aiVerdict: result.text, aiVerdictAt: new Date().toISOString(), aiProvider: result.provider });
+          consecutiveErrors = 0;
+        } catch (error) {
+          consecutiveErrors += 1;
+          bulkVerdict.errors.push(`${repo.fullName}: ${error.message.slice(0, 100)}`);
+          if (consecutiveErrors >= 5) {
+            bulkVerdict.errors.push("Gestopt na 5 fouten op rij.");
+            break;
+          }
+        }
+        bulkVerdict.done += 1;
+      }
+      bulkVerdict.running = false;
+      bulkVerdict.current = "";
+    })();
+    res.json(bulkVerdict);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 if (production) {
   const dist = path.join(root, "dist");
   app.use(express.static(dist));
@@ -1004,6 +1455,40 @@ if (production) {
 }
 
 await ensureData();
+
+// --- server.json: tells clients (the Obsidian plugin, scripts) where this
+// server lives. The desktop app picks a free port at every start, so the port
+// can't be hardcoded anywhere else. Removed again on a clean shutdown; a
+// stale file after a hard kill is harmless (clients probe before trusting it).
+const serverInfoPath = path.join(dataDir, "server.json");
+const writeServerInfo = async () => {
+  try {
+    await fs.writeFile(
+      serverInfoPath,
+      `${JSON.stringify({ port, pid: process.pid, startedAt: new Date().toISOString(), dataDir, mode: production ? "production" : "dev" }, null, 2)}
+`
+    );
+  } catch {
+    /* non-fatal */
+  }
+};
+const removeServerInfo = () => {
+  try {
+    const current = JSON.parse(readFileSync(serverInfoPath, "utf8"));
+    if (current.pid === process.pid) unlinkSync(serverInfoPath);
+  } catch {
+    /* already gone or not ours */
+  }
+};
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    removeServerInfo();
+    process.exit(0);
+  });
+}
+process.on("exit", removeServerInfo);
+
 app.listen(port, "127.0.0.1", () => {
   console.log(`Repo Notebook running at http://127.0.0.1:${port}`);
+  void writeServerInfo();
 });

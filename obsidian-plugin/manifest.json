@@ -1,0 +1,10 @@
+{
+  "id": "repo-notebook",
+  "name": "Repo Notebook",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Your Repo Notebook inside Obsidian: every saved GitHub repo becomes a note, the knowledge-graph links become wikilinks, and clone/install/start stay one command away.",
+  "author": "Thomas Huybrechts",
+  "authorUrl": "https://github.com/TMSHuybrechts",
+  "isDesktopOnly": true
+}

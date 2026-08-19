@@ -124,6 +124,13 @@ const killServer = () => {
   } catch {
     /* ignore */
   }
+  // The server writes data/server.json (port discovery for the Obsidian
+  // plugin); a hard kill skips its own cleanup, so drop the file here.
+  try {
+    fs.unlinkSync(path.join(dataDir, "server.json"));
+  } catch {
+    /* already gone */
+  }
 };
 
 app.whenReady().then(async () => {

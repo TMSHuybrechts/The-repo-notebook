@@ -1,0 +1,278 @@
+/* Repo Notebook for Obsidian — side panel + modals. Uses Obsidian's theme
+   variables so it follows light/dark and community themes. */
+
+.rn-shelf {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  gap: 0;
+}
+
+.rn-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 4px;
+}
+
+.rn-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+}
+
+.rn-title-icon svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-accent);
+}
+
+.rn-count {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: var(--font-ui-smaller);
+}
+
+.rn-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  margin-left: 6px;
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+.rn-dot.is-online {
+  background: var(--color-green);
+  box-shadow: 0 0 6px var(--color-green);
+}
+.rn-dot.is-offline {
+  background: var(--text-faint);
+}
+
+.rn-statusbar {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rn-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 12px;
+}
+
+.rn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-ui-smaller);
+  padding: 3px 9px;
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: none;
+  cursor: pointer;
+}
+.rn-btn:hover {
+  background: var(--interactive-hover);
+}
+.rn-btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rn-search {
+  padding: 4px 12px;
+}
+.rn-search input {
+  width: 100%;
+}
+
+.rn-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 12px 8px;
+}
+.rn-chip {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  height: auto;
+  line-height: 1.5;
+}
+.rn-chip:hover {
+  color: var(--text-normal);
+  border-color: var(--text-faint);
+}
+.rn-chip.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.rn-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0 6px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.rn-letter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background-primary);
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 8px 8px 2px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.rn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.rn-row:hover {
+  background: var(--background-modifier-hover);
+}
+.rn-row.is-status-todo {
+  border-left-color: #58a6ff;
+}
+.rn-row.is-status-installed {
+  border-left-color: #f0883e;
+}
+.rn-row.is-status-keep {
+  border-left-color: #4fd1a5;
+}
+.rn-row.is-status-archive {
+  border-left-color: #8b949e;
+}
+
+.rn-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rn-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.rn-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rn-owner {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rn-stars {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+.rn-row-sub {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rn-run-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-green);
+  box-shadow: 0 0 6px var(--color-green);
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.rn-more {
+  flex: 0 0 auto;
+  opacity: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.rn-row:hover .rn-more {
+  opacity: 1;
+}
+.rn-more svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rn-footer {
+  padding: 6px 12px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.rn-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.rn-empty .rn-btn {
+  margin-top: 8px;
+}
+
+/* modals */
+.rn-modal .rn-muted {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.rn-modal .rn-hint {
+  min-height: 1.4em;
+}
+.rn-modal .setting-item {
+  border-top: none;
+  padding-top: 6px;
+}
+.rn-modal .rn-textarea,
+.rn-modal textarea {
+  width: 100%;
+  min-width: 420px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+.rn-log {
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--background-secondary);
+  padding: 10px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

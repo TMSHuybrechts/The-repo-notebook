@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ClipboardList,
+  Container,
   Copy,
   Download,
   ExternalLink,
@@ -18,7 +19,9 @@ import {
   Github,
   Globe,
   HardDriveDownload,
+  List,
   Loader2,
+  Network,
   PackageCheck,
   Play,
   Plus,
@@ -30,9 +33,12 @@ import {
   Star,
   Trash2,
   Upload,
-  X
+  X,
+  Zap
 } from "lucide-react";
-import { bulkSave, checkUpdates, cloneRepo, deleteClone, importNotebook, importStars, installRepo, loadConfig, loadLog, loadNotebook, loadRuntime, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveRepo, setRepoMeta, startRepo, stopRepo } from "./api";
+import { bulkSave, bulkVerdictStatus, checkUpdates, cloneRepo, deleteClone, dockerStart, dockerStatus, dockerStop, importNotebook, importStars, installRepo, loadConfig, loadDuplicates, loadEnv, loadGraph, loadLog, loadNotebook, loadRuntime, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveEnv, saveRepo, setRepoMeta, startBulkVerdicts, startContainer, startRepo, stopRepo } from "./api";
+import { GraphView, RelatedPanel } from "./graph-view.jsx";
+import { QuickstartView } from "./quickstart.jsx";
 import { fileSize, languageColor, letters, repoLetter, shortDate, shortNumber } from "./format";
 import "./styles.css";
 
@@ -187,14 +193,96 @@ function App() {
   const [trendingError, setTrendingError] = useState("");
   const [config, setConfig] = useState({ ai: false, token: false });
   const [addOpen, setAddOpen] = useState(false);
+  const [view, setView] = useState("list");
+  const [graph, setGraph] = useState(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [dups, setDups] = useState({});
+  const [aiJob, setAiJob] = useState(null);
 
+  // Elders-gekloond-scan (repoget-map e.d.) + lopende bulk-AI-job oppikken.
+  useEffect(() => {
+    loadDuplicates()
+      .then((data) => setDups(Object.fromEntries((data.items || []).map((item) => [item.id, item.path]))))
+      .catch(() => {});
+    bulkVerdictStatus()
+      .then((status) => status.running && setAiJob(status))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!aiJob?.running) return undefined;
+    const timer = setInterval(() => {
+      bulkVerdictStatus()
+        .then((status) => {
+          setAiJob(status);
+          if (!status.running) {
+            loadNotebook().then(({ repos: fresh }) => setRepos(fresh)).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [aiJob?.running]);
+
+  const missingVerdicts = useMemo(() => repos.filter((repo) => !repo.aiVerdict).length, [repos]);
+
+  const runBulkAi = async () => {
+    setError("");
+    try {
+      setAiJob(await startBulkVerdicts());
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Rebuild the knowledge map whenever the shelf changes (add/remove/refresh
+  // or a category edit) — the server caches, so this is cheap when unchanged.
+  const graphKey = useMemo(
+    () => repos.map((repo) => `${repo.id}|${repo.fetchedAt}|${repo.category || ""}`).join(";"),
+    [repos]
+  );
+  useEffect(() => {
+    if (!repos.length) return;
+    setGraphLoading(true);
+    loadGraph()
+      .then(setGraph)
+      .catch(() => {})
+      .finally(() => setGraphLoading(false));
+  }, [graphKey]);
+
+  // Deep link: /#repo=owner/name selects that repo (used by the Obsidian
+  // plugin's "open in Repo Notebook"). Also reacts to later hash changes.
+  const hashRepoId = () => {
+    const m = /^#repo=(.+)$/.exec(window.location.hash || "");
+    return m ? decodeURIComponent(m[1]).toLowerCase() : "";
+  };
   useEffect(() => {
     loadNotebook()
       .then(({ repos }) => {
         setRepos(repos);
-        setSelectedId(repos[0]?.id || "");
+        const wanted = hashRepoId();
+        const hit = wanted && repos.find((repo) => repo.id === wanted);
+        setSelectedId(hit ? hit.id : repos[0]?.id || "");
       })
       .catch((err) => setError(err.message));
+  }, []);
+  useEffect(() => {
+    const onHash = () => {
+      const wanted = hashRepoId();
+      if (!wanted) return;
+      setRepos((items) => {
+        if (items.some((repo) => repo.id === wanted)) {
+          setLetter("");
+          setCatFilter("");
+          setStatusFilter("");
+          setSelectedId(wanted);
+          setView("list");
+        }
+        return items;
+      });
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   useEffect(() => {
@@ -329,10 +417,52 @@ function App() {
     }
   };
 
+  const openFromMap = (id) => {
+    setCatFilter("");
+    setStatusFilter("");
+    setLetter("");
+    setSelectedId(id);
+    setView("list");
+  };
+
   return (
     <main className="app">
       <TopBar busy={busy} error={error} notice={notice} openAdd={() => setAddOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
       <TrendingTicker busy={busy} error={trendingError} onSave={saveTrending} repos={trending} />
+      <div className="viewbar">
+        <div className="viewbar-tools">
+          {((config.aiProvider === "ollama" && missingVerdicts > 0) || aiJob) && (
+            <button className="ai-bulk" disabled={Boolean(aiJob?.running)} onClick={runBulkAi} title="Laat de lokale AI (Ollama) alle repos zonder oordeel afwerken — enkel zichtbaar als Ollama draait" type="button">
+              {aiJob?.running ? <Loader2 className="spin" size={14} /> : <Sparkles size={14} />}
+              {aiJob?.running
+                ? `AI-oordelen: ${aiJob.done}/${aiJob.total}${aiJob.current ? ` — ${aiJob.current}` : ""}`
+                : aiJob
+                  ? `AI klaar (${aiJob.done}/${aiJob.total}${aiJob.errors?.length ? `, ${aiJob.errors.length} fouten` : ""})`
+                  : `AI-oordelen aanvullen (${missingVerdicts})`}
+            </button>
+          )}
+        </div>
+        <div className="segment view-switch">
+          <button className={view === "list" ? "active" : ""} onClick={() => setView("list")} type="button">
+            <List size={15} /> Lijst
+          </button>
+          <button className={view === "map" ? "active" : ""} onClick={() => setView("map")} type="button">
+            <Network size={15} /> Kaart
+          </button>
+          <button className={view === "run" ? "active" : ""} onClick={() => setView("run")} type="button">
+            <Zap size={15} /> Snelstart
+          </button>
+        </div>
+      </div>
+      {view === "map" ? (
+        <section className="workspace map-mode">
+          <GraphView graph={graph} loading={graphLoading} onOpenRepo={openFromMap} />
+        </section>
+      ) : view === "run" ? (
+        <section className="workspace map-mode">
+          <QuickstartView dups={dups} onOpenRepo={openFromMap} />
+        </section>
+      ) : (
       <section className="workspace">
         <LetterRail groups={groups} letter={letter} setLetter={setLetter} />
         <NotebookList
@@ -351,14 +481,18 @@ function App() {
           busy={busy}
           categories={categories}
           config={config}
+          dupPath={selected ? dups[selected.id] : ""}
+          graph={graph}
           refresh={refresh}
           remove={remove}
           openLocal={openLocal}
           onRepoUpdate={updateRepo}
+          onSelectRepo={setSelectedId}
           repo={selected}
           setCloneFor={setCloneFor}
         />
       </section>
+      )}
       {cloneFor && (
         <CloneDialog
           repo={cloneFor}
@@ -571,7 +705,7 @@ function EmptyList() {
   );
 }
 
-function RepoDetail({ busy, categories, config, onRepoUpdate, openLocal, refresh, remove, repo, setCloneFor }) {
+function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, onSelectRepo, openLocal, refresh, remove, repo, setCloneFor }) {
   const [tab, setTab] = useState("readme");
 
   if (!repo) {
@@ -640,7 +774,10 @@ function RepoDetail({ busy, categories, config, onRepoUpdate, openLocal, refresh
           <RuntimePanel onRepoUpdate={onRepoUpdate} repo={repo} />
           {(tab === "readme" || tab === "about") && <Readme repo={repo} />}
         </div>
-        <About repo={repo} />
+        <div className="side-col">
+          <About dupPath={dupPath} repo={repo} />
+          <RelatedPanel graph={graph} onSelect={onSelectRepo} repo={repo} />
+        </div>
       </div>
     </section>
   );
@@ -697,7 +834,7 @@ function Readme({ repo }) {
   );
 }
 
-function About({ repo }) {
+function About({ dupPath, repo }) {
   return (
     <aside className="panel about">
       <h2>Over</h2>
@@ -709,6 +846,7 @@ function About({ repo }) {
         <dt>Licentie</dt>
         <dd>{repo.license || "Onbekend"}</dd>
         {repo.localPath && <><dt>Lokaal</dt><dd><code className="local-path">{repo.localPath}</code></dd></>}
+        {dupPath && <><dt>Ook gekloond in</dt><dd><code className="local-path dup-path" title="Deze repo staat al ergens anders op je schijf">{dupPath}</code></dd></>}
         <dt>Opgeslagen</dt>
         <dd>{shortDate(repo.savedAt)}</dd>
       </dl>
@@ -760,10 +898,12 @@ function RuntimePanel({ onRepoUpdate, repo }) {
     setBusy(action);
     setError("");
     try {
-      const data = await ({ install: installRepo, start: startRepo, stop: stopRepo, pull: pullRepo }[action])(repo);
+      const starter = repo.containerMode ? startContainer : startRepo;
+      const data = await ({ install: installRepo, start: starter, stop: stopRepo, pull: pullRepo }[action])(repo);
       if (data.repo) onRepoUpdate(data.repo);
       setRuntime(data.runtime || (await loadRuntime(data.repo || repo)));
       if (action === "pull") setBehind(0);
+      if (action === "start" && data.portWarning) setError(data.portWarning);
     } catch (err) {
       setError(err.message);
       await refresh();
@@ -868,12 +1008,200 @@ function RuntimePanel({ onRepoUpdate, repo }) {
           {install && <code>{install.label}</code>}
           {start && <code>{start.label}</code>}
           {runtime?.running && <strong>PID {runtime.pid}</strong>}
+          {runtime?.running && runtime?.mode === "container" && <strong className="mode-chip"><Container size={12} /> container</strong>}
           {repo.installedAt && <span>Installed {shortDate(repo.installedAt)}</span>}
         </div>
         {error && <div className="runtime-error">{error}</div>}
+        <ContainerControls onRepoUpdate={onRepoUpdate} repo={repo} />
+        <EnvEditor repo={repo} />
         {runtime?.log && <pre className="runtime-log">{runtime.log}</pre>}
       </div>
     </section>
+  );
+}
+
+// Containermodus per repo: install + start gebeuren dan in Docker in plaats
+// van op de host. Opt-in en onthouden per repo; Docker Desktop wordt
+// on-demand gestart en kan hier ook weer uit (RAM terug).
+function ContainerControls({ onRepoUpdate, repo }) {
+  const [docker, setDocker] = useState(null);
+  const [port, setPort] = useState(repo.containerPort || "");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setPort(repo.containerPort || "");
+    setError("");
+  }, [repo.id]);
+
+  useEffect(() => {
+    if (repo.containerMode) dockerStatus().then(setDocker).catch(() => {});
+  }, [repo.id, repo.containerMode]);
+
+  const commit = async (patch) => {
+    setError("");
+    try {
+      const { repo: updated } = await setRepoMeta(repo, patch);
+      if (updated) onRepoUpdate(updated);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const dockerAction = async (action) => {
+    setBusy(action);
+    setError("");
+    try {
+      if (action === "start") setDocker(await dockerStart());
+      else {
+        await dockerStop();
+        setDocker(await dockerStatus());
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="container-block">
+      <label className="container-toggle">
+        <input
+          checked={Boolean(repo.containerMode)}
+          onChange={(event) => commit({ containerMode: event.target.checked })}
+          type="checkbox"
+        />
+        <Container size={15} /> In container draaien — install &amp; start in Docker, je PC blijft proper
+      </label>
+      {repo.containerMode && (
+        <div className="container-opts">
+          <label className="container-port">
+            Poort
+            <input
+              inputMode="numeric"
+              onBlur={() => (repo.containerPort || "") !== port.trim() && commit({ containerPort: port.trim() })}
+              onChange={(event) => setPort(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
+              placeholder={repo.lastPort || "bv. 3000"}
+              value={port}
+            />
+          </label>
+          <label className="container-gpu">
+            <input
+              checked={Boolean(repo.containerGpu)}
+              onChange={(event) => commit({ containerGpu: event.target.checked })}
+              type="checkbox"
+            />
+            GPU (RTX)
+          </label>
+          {docker && (
+            <span className={`docker-chip ${docker.running ? "on" : ""}`}>
+              Docker {docker.running ? "draait" : docker.installed ? "uit" : "ontbreekt"}
+            </span>
+          )}
+          {docker && docker.installed && !docker.running && (
+            <button disabled={busy === "start"} onClick={() => dockerAction("start")} type="button">
+              {busy === "start" ? <Loader2 className="spin" size={13} /> : <Play size={13} />} Start Docker (±30-60s)
+            </button>
+          )}
+          {docker?.running && (
+            <button disabled={busy === "stop"} onClick={() => dockerAction("stop")} title="Sluit Docker Desktop af en geef RAM terug (kan enkel als er geen containers draaien)" type="button">
+              {busy === "stop" ? <Loader2 className="spin" size={13} /> : <Square size={13} />} Stop Docker
+            </button>
+          )}
+        </div>
+      )}
+      {error && <div className="env-error">{error}</div>}
+    </div>
+  );
+}
+
+// .env van de clone bekijken/aanpassen zonder verkenner + kladblok: veel
+// AI-repos falen enkel op ontbrekende keys, dit haalt die drempel weg.
+function EnvEditor({ repo }) {
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState("");
+  const [example, setExample] = useState(null);
+  const [exists, setExists] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [savedTick, setSavedTick] = useState(false);
+
+  useEffect(() => {
+    setOpen(false);
+    setContent("");
+    setExample(null);
+    setExists(false);
+    setError("");
+  }, [repo.id]);
+
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await loadEnv(repo);
+      setContent(data.content || "");
+      setExample(data.example || null);
+      setExists(Boolean(data.exists));
+      setOpen(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await saveEnv(repo, content);
+      setExists(true);
+      setSavedTick(true);
+      setTimeout(() => setSavedTick(false), 2500);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="env-row">
+        <button className="env-toggle" disabled={busy} onClick={load} type="button">
+          {busy ? <Loader2 className="spin" size={14} /> : <File size={14} />} .env bewerken
+        </button>
+        {error && <span className="env-error">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="env-editor">
+      <div className="env-head">
+        <strong><File size={14} /> .env {exists ? "" : "(nog niet aanwezig)"}</strong>
+        <div className="env-actions">
+          {example && !content.trim() && (
+            <button onClick={() => setContent(example.content)} type="button">Vul met {example.name}</button>
+          )}
+          <button className="primary" disabled={busy} onClick={save} type="button">
+            {busy ? <Loader2 className="spin" size={14} /> : <CheckCircle2 size={14} />} {savedTick ? "Bewaard" : "Bewaar"}
+          </button>
+          <button onClick={() => setOpen(false)} type="button"><X size={14} /></button>
+        </div>
+      </div>
+      <textarea
+        className="env-textarea"
+        onChange={(event) => setContent(event.target.value)}
+        placeholder={example ? `Leeg — klik "Vul met ${example.name}" voor de template.` : "KEY=waarde"}
+        rows={Math.min(16, Math.max(6, content.split("\n").length + 1))}
+        spellCheck={false}
+        value={content}
+      />
+      {error && <div className="env-error">{error}</div>}
+    </div>
   );
 }
 
