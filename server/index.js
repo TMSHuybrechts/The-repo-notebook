@@ -4,7 +4,9 @@ import { createReadStream, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildGraph } from "./graph.js";
+import { createRepoNotebookMcpServer, MCP_VERSION } from "../mcp/server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -18,6 +20,7 @@ const runsDir = path.join(dataDir, "runs");
 const production = process.argv.includes("--production") || process.env.NODE_ENV === "production";
 const port = Number(process.env.PORT || 5188);
 const running = new Map();
+const terminalSessions = new Map();
 let trendingCache = { fetchedAt: "", repos: [] };
 
 const app = express();
@@ -48,6 +51,46 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+
+// --- MCP over HTTP ----------------------------------------------------------
+// The same tools as mcp/server.js (stdio), served as stateless MCP Streamable
+// HTTP on /mcp. It sits behind the localhost host/origin guard above, so only
+// local clients (Claude Code, Codex CLI, a tunnel you start yourself) reach it.
+const mcpEndpoint = `http://127.0.0.1:${port}/mcp`;
+app.get("/api/mcp/status", (_req, res) => {
+  res.json({
+    enabled: true,
+    name: "repo-notebook",
+    version: MCP_VERSION,
+    transports: ["streamable-http", "stdio"],
+    endpoint: mcpEndpoint,
+    stdio: `node ${path.join(root, "mcp", "server.js")}`,
+    localOnly: true
+  });
+});
+
+app.post("/mcp", async (req, res) => {
+  const server = createRepoNotebookMcpServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (error) {
+    console.error("MCP request failed:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal MCP error" }, id: null });
+    }
+  } finally {
+    await transport.close().catch(() => {});
+    await server.close().catch(() => {});
+  }
+});
+
+for (const method of ["get", "delete"]) {
+  app[method]("/mcp", (_req, res) => {
+    res.status(405).json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null });
+  });
+}
 
 const repoPart = /^[A-Za-z0-9._-]+$/;
 const ownerPart = /^[A-Za-z0-9-]+$/;
@@ -520,6 +563,97 @@ const startCommand = async (repo, target, command, opts = {}) => {
   return { pid: child.pid, startedAt };
 };
 
+// --- Embedded terminal per clone ------------------------------------------
+// One persistent shell per repo, rooted in its clone folder. Output is kept in
+// memory (capped) and polled by the UI; input is plain lines to the shell's
+// stdin. Commands run with the same trust as install/start: your own machine,
+// your own choice. Only reachable through the localhost guard.
+const TERMINAL_MAX_OUTPUT = 200000;
+const TERMINAL_KEEP_OUTPUT = 160000;
+
+const terminalShell = () => {
+  if (process.platform === "win32") {
+    const pwsh = process.env.RN_TERMINAL_SHELL || "powershell.exe";
+    return { cmd: pwsh, args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", "-"] };
+  }
+  const cmd = process.env.RN_TERMINAL_SHELL || process.env.SHELL || "/bin/bash";
+  return { cmd, args: cmd.endsWith("bash") ? ["--noprofile", "--norc"] : [] };
+};
+
+const terminalSnapshot = (repo) => {
+  const session = terminalSessions.get(repo.id);
+  return {
+    running: Boolean(session?.running),
+    pid: session?.child.pid || null,
+    startedAt: session?.startedAt || "",
+    updatedAt: session?.updatedAt || "",
+    output: session?.output || "",
+    shell: session?.shell || "",
+    cwd: session?.cwd || ""
+  };
+};
+
+const appendTerminalOutput = (session, chunk) => {
+  session.output += chunk.toString();
+  if (session.output.length > TERMINAL_MAX_OUTPUT) session.output = session.output.slice(-TERMINAL_KEEP_OUTPUT);
+  session.updatedAt = new Date().toISOString();
+};
+
+const startTerminalSession = async (repo, target) => {
+  const existing = terminalSessions.get(repo.id);
+  if (existing?.running) return existing;
+
+  const shell = terminalShell();
+  const child = spawn(shell.cmd, shell.args, {
+    cwd: target,
+    shell: false,
+    windowsHide: true,
+    env: { ...process.env, TERM: process.env.TERM || "xterm-256color", GIT_TERMINAL_PROMPT: "0" }
+  });
+  const session = {
+    child,
+    running: true,
+    shell: path.basename(shell.cmd),
+    cwd: target,
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    output: `Repo Notebook terminal\nWerkmap: ${target}\nShell: ${path.basename(shell.cmd)}\n\n`
+  };
+  terminalSessions.set(repo.id, session);
+  child.stdout.on("data", (chunk) => appendTerminalOutput(session, chunk));
+  child.stderr.on("data", (chunk) => appendTerminalOutput(session, chunk));
+  child.on("error", (error) => {
+    appendTerminalOutput(session, `\n[terminalfout] ${error.message}\n`);
+    session.running = false;
+  });
+  child.on("close", (code) => {
+    appendTerminalOutput(session, `\n[terminal afgesloten met code ${code}]\n`);
+    session.running = false;
+  });
+
+  if (process.platform === "win32") {
+    child.stdin.write("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new()\n");
+  }
+  return session;
+};
+
+const stopTerminalSession = (repo) => {
+  const session = terminalSessions.get(repo.id);
+  if (!session) return;
+  if (session.running) {
+    if (process.platform === "win32") {
+      spawn("taskkill.exe", ["/PID", String(session.child.pid), "/T", "/F"], { shell: false, windowsHide: true });
+    } else {
+      session.child.kill("SIGTERM");
+    }
+  }
+  session.running = false;
+};
+
+const stopAllTerminals = () => {
+  for (const [id] of terminalSessions) stopTerminalSession({ id });
+};
+
 const openPath = (target) => {
   const opener = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
   const child = spawn(opener, [target], { detached: true, shell: false, stdio: "ignore" });
@@ -891,7 +1025,8 @@ app.get("/api/runtimes", async (_req, res) => {
         mode: run?.mode || "",
         lastPort: repo.lastPort || "",
         lastUrl: repo.lastUrl || "",
-        containerMode: Boolean(repo.containerMode)
+        containerMode: Boolean(repo.containerMode),
+        terminal: Boolean(terminalSessions.get(repo.id)?.running)
       });
     }
     items.sort((a, b) => Number(b.running) - Number(a.running) || a.name.localeCompare(b.name));
@@ -918,6 +1053,83 @@ app.get("/api/notebook/:owner/:repo/log", async (req, res) => {
     const repo = findRepo(store, req.params.owner, req.params.repo);
     if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
     res.json({ log: await tailLog(repo) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Terminal endpoints ---
+const terminalRepo = async (req, res) => {
+  const store = await readStore();
+  const repo = findRepo(store, req.params.owner, req.params.repo);
+  if (!repo) {
+    res.status(404).json({ error: "Repository is not saved yet." });
+    return null;
+  }
+  const target = cloneTarget(repo); // guarded: cannot escape the data dir
+  if (!(await fileExists(target))) {
+    res.status(404).json({ error: "Repository is not cloned yet." });
+    return null;
+  }
+  return { repo, target };
+};
+
+app.get("/api/notebook/:owner/:repo/terminal", async (req, res) => {
+  try {
+    const found = await terminalRepo(req, res);
+    if (!found) return;
+    res.json(terminalSnapshot(found.repo));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/notebook/:owner/:repo/terminal/start", async (req, res) => {
+  try {
+    const found = await terminalRepo(req, res);
+    if (!found) return;
+    await startTerminalSession(found.repo, found.target);
+    res.json(terminalSnapshot(found.repo));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/notebook/:owner/:repo/terminal/input", async (req, res) => {
+  try {
+    const found = await terminalRepo(req, res);
+    if (!found) return;
+    const input = typeof req.body?.input === "string" ? req.body.input : "";
+    if (!input.trim()) return res.status(400).json({ error: "Typ een commando." });
+    if (input.length > 8000 || input.includes("\0")) return res.status(400).json({ error: "Terminal-invoer is ongeldig of te lang." });
+    const session = await startTerminalSession(found.repo, found.target);
+    if (!session.running) return res.status(409).json({ error: "De terminal is gestopt — open hem opnieuw." });
+    appendTerminalOutput(session, `\n$ ${input}\n`);
+    session.child.stdin.write(`${input}\n`);
+    res.json(terminalSnapshot(found.repo));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/notebook/:owner/:repo/terminal/clear", async (req, res) => {
+  try {
+    const found = await terminalRepo(req, res);
+    if (!found) return;
+    const session = terminalSessions.get(found.repo.id);
+    if (session) session.output = "";
+    res.json(terminalSnapshot(found.repo));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/notebook/:owner/:repo/terminal/stop", async (req, res) => {
+  try {
+    const found = await terminalRepo(req, res);
+    if (!found) return;
+    stopTerminalSession(found.repo);
+    res.json(terminalSnapshot(found.repo));
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -1348,6 +1560,8 @@ app.post("/api/notebook/:owner/:repo/delete-clone", async (req, res) => {
       else run.child.kill("SIGTERM");
       running.delete(repo.id);
     }
+    stopTerminalSession(repo);
+    terminalSessions.delete(repo.id);
     await fs.rm(target, { recursive: true, force: true });
     const updated = await patchRepo(repo, { cloneStatus: "", localPath: "", installStatus: "" });
     res.json({ status: "deleted", repo: updated, runtime: await runtimeFor(updated) });
@@ -1465,8 +1679,7 @@ const writeServerInfo = async () => {
   try {
     await fs.writeFile(
       serverInfoPath,
-      `${JSON.stringify({ port, pid: process.pid, startedAt: new Date().toISOString(), dataDir, mode: production ? "production" : "dev" }, null, 2)}
-`
+      `${JSON.stringify({ port, pid: process.pid, startedAt: new Date().toISOString(), dataDir, mode: production ? "production" : "dev", mcp: mcpEndpoint }, null, 2)}\n`
     );
   } catch {
     /* non-fatal */
@@ -1482,6 +1695,7 @@ const removeServerInfo = () => {
 };
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => {
+    stopAllTerminals();
     removeServerInfo();
     process.exit(0);
   });

@@ -8,8 +8,9 @@
     "dev": "node server/index.js",
     "build": "vite build",
     "preview": "node server/index.js --production",
-    "app": "electron .",
-    "app:build": "npm run build && electron-builder"
+    "app": "npm run build && electron .",
+    "app:build": "npm run build && electron-builder",
+    "mcp": "node mcp/server.js"
   },
   "build": {
     "appId": "com.thomashuybrechts.reponotebook",
@@ -20,6 +21,7 @@
     "files": [
       "dist/**",
       "server/**",
+      "mcp/**",
       "electron/**",
       "public/**",
       "package.json"

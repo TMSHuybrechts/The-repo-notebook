@@ -21,11 +21,12 @@ Repo Notebook is a local desktop app (and plain Node app) for the GitHub reposit
 - Python installs always go into a `.venv` inside the clone — never your global site-packages.
 - **Quick start tab**: every clone as a card with start/stop, PID and uptime, URL, "open folder" and "jump to list"; a port guard warns when two running repos want the same port; "check all updates" fetches every clone and shows how many commits behind each one is (pull from the app).
 - `.env` editor per clone (with `.env.example` as template), git pull, disk size per clone, delete clone.
+- **Terminal** per cloned repo: a drawer with a persistent shell (PowerShell on Windows, your `$SHELL` elsewhere) that starts in the clone folder — `git status`, an npm script, a quick look around — without leaving the app.
 - Optional **container mode** (opt-in per repo): install and run inside Docker (node / python / golang / rust base images, or the repo's own compose file), clone bind-mounted, ports mapped, optional GPU; Docker Desktop is started on demand.
 
 **AI, agents, Obsidian**
 - **"Is this worth it?"** verdict per repo — local **Ollama** by default (zero tokens), Anthropic or OpenAI optional. Bulk verdicts for everything you saved (only with a local provider unless you force it).
-- **MCP server** (`mcp/server.js`, stdio): `list_saved_repos`, `save_repo`, `bulk_save`, `search_github`, `clone_repo`, `trending_repos`, `set_repo_meta`, `remove_repo` — Claude Code or any MCP client drives the same shelf. Register with `.mcp.json` (included) or `claude mcp add repo-notebook -- node mcp/server.js`.
+- **MCP server**: `list_saved_repos`, `save_repo`, `bulk_save`, `search_github`, `clone_repo`, `trending_repos`, `set_repo_meta`, `remove_repo` — Claude Code, Codex or any MCP client drives the same shelf. Two transports: **stdio** (`npm run mcp` / `.mcp.json` / `claude mcp add repo-notebook -- node mcp/server.js`) and **Streamable HTTP** at `http://127.0.0.1:<port>/mcp` while the app runs (`claude mcp add --transport http repo-notebook http://127.0.0.1:5188/mcp`). The **MCP** chip in the app shows the live endpoint and copy-ready commands; the endpoint stays behind the loopback guard.
 - **Obsidian plugin** (`obsidian-plugin/`): every saved repo becomes a note, the graph links become `[[wikilinks]]` (your repo map in Obsidian's graph view), a side panel with clone/install/start/stop, and two-way status/category/notes sync through the same data file. See [obsidian-plugin/README.md](obsidian-plugin/README.md).
 
 ## Run
@@ -44,7 +45,7 @@ npm run app:build    # build the Windows installer (electron-builder, output in 
 
 On Windows you can also double-click `Start Repo Notebook.bat`. The app needs `git` on your PATH; `python` for Python repos; Docker Desktop only for container mode.
 
-Data lives in `%LOCALAPPDATA%\RepoNotebook\data` (`notebook.json`, `clones/`, `runs/`) — or wherever `RN_DATA_DIR` points. The server writes `server.json` (port, pid) next to it on start so clients such as the Obsidian plugin can find the desktop app, which picks a free port every launch. Opening `/#repo=owner/name` selects that repo in the UI.
+Data lives in `%LOCALAPPDATA%\RepoNotebook\data` (`notebook.json`, `clones/`, `runs/`, `server.log`) — or wherever `RN_DATA_DIR` points. The server writes `server.json` (port, pid, MCP endpoint) next to it on start so clients such as the Obsidian plugin can find the desktop app, which uses port 5188 when free and any free port otherwise. Opening `/#repo=owner/name` selects that repo in the UI.
 
 ## Security & privacy
 
@@ -55,6 +56,7 @@ Optional environment variables:
 - `GITHUB_TOKEN` — higher GitHub API rate limit and access to private repos.
 - `RN_DATA_DIR` — data folder (default `%LOCALAPPDATA%\RepoNotebook\data`). `PORT` — server port (default 5188; the desktop app picks a free one).
 - `RN_AI_PROVIDER` — `ollama` (default, local, no tokens) · `anthropic` · `openai`. `RN_AI_MODEL` — model name. `RN_OLLAMA_URL` / `OLLAMA_HOST` — where Ollama listens. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENAI_BASE_URL` — only for those providers.
+- `RN_TERMINAL_SHELL` — shell for the embedded terminal (default `powershell.exe` on Windows, `$SHELL` elsewhere).
 - `RN_EXTRA_CLONE_DIRS` — extra folders (`;`-separated) scanned for duplicate clones (default: the author's `D:\PROJECTS\GITHUB_REPOS`; set your own or leave it — a missing folder is skipped).
 
 ## Notes

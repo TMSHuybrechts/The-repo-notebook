@@ -30,6 +30,9 @@ During development the Express server uses Vite middleware, so `npm run dev` sta
 - `POST /api/notebook/:owner/:repo/install` runs the detected install command in the local clone folder.
 - `POST /api/notebook/:owner/:repo/start` starts the detected local run command and keeps the process attached to Repo Notebook.
 - `POST /api/notebook/:owner/:repo/stop` stops a process started by Repo Notebook.
+- `GET|POST /api/notebook/:owner/:repo/terminal[/start|/input|/clear|/stop]` manages one persistent local shell session rooted in a cloned repository.
+- `GET /api/mcp/status` reports the MCP transports and the local HTTP endpoint.
+- `POST /mcp` serves the Repo Notebook MCP tools over stateless Streamable HTTP (same tools as `mcp/server.js` over stdio).
 
 ## GitHub Data
 
@@ -44,4 +47,6 @@ The trending ticker uses GitHub Search API data. It first looks for repositories
 - Install and start commands are detected from local project files and run with argument arrays in the cloned repository directory.
 - Clone destinations are resolved and checked to remain under `data/clones`.
 - Existing clone directories are not overwritten.
+- The MCP HTTP endpoint sits behind the same loopback host/origin guard as the rest of the app.
+- Terminal sessions are only created for saved repositories whose guarded clone directory exists; input goes to the shell's stdin as plain lines.
 - README content is stored locally and displayed as plain Markdown text, avoiding HTML injection and keeping long content constrained inside the README panel.

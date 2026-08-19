@@ -71,6 +71,26 @@ export const setRepoMeta = (repo, meta) =>
 
 export const loadConfig = () => fetch("/api/config").then(json);
 
+export const loadMcpStatus = () => fetch("/api/mcp/status").then(json);
+
+const terminalUrl = (repo, suffix = "") =>
+  `/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/terminal${suffix}`;
+
+export const loadTerminal = (repo) => fetch(terminalUrl(repo)).then(json);
+
+export const startTerminal = (repo) => fetch(terminalUrl(repo, "/start"), { method: "POST" }).then(json);
+
+export const sendTerminalInput = (repo, input) =>
+  fetch(terminalUrl(repo, "/input"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input })
+  }).then(json);
+
+export const clearTerminal = (repo) => fetch(terminalUrl(repo, "/clear"), { method: "POST" }).then(json);
+
+export const stopTerminal = (repo) => fetch(terminalUrl(repo, "/stop"), { method: "POST" }).then(json);
+
 export const bulkSave = (text) =>
   fetch("/api/notebook/bulk", {
     method: "POST",

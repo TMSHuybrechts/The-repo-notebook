@@ -5,7 +5,9 @@
 // SAME data dir (%LOCALAPPDATA%\RepoNotebook), so the app and this server stay
 // in sync — save a repo here and it shows up in the app, and vice versa.
 //
-// Transport: stdio. Register via `.mcp.json` or `claude mcp add`.
+// Transports: stdio when run directly (`.mcp.json`, `claude mcp add`, Codex),
+// and Streamable HTTP when the desktop server imports the factory below and
+// serves the same tools on /mcp.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -13,6 +15,7 @@ import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const baseDir =
   process.env.RN_DATA_DIR ||
@@ -192,7 +195,13 @@ const searchRepos = async (query) => {
 
 const text = (value) => ({ content: [{ type: "text", text: value }] });
 
-const server = new McpServer({ name: "repo-notebook", version: "0.1.0" });
+export const MCP_VERSION = "0.2.0";
+
+// Builds a fresh server with every tool registered. The stdio entry point
+// below uses one for the whole process; the HTTP endpoint in server/index.js
+// builds one per request (stateless Streamable HTTP).
+export const createRepoNotebookMcpServer = () => {
+const server = new McpServer({ name: "repo-notebook", version: MCP_VERSION });
 
 server.tool(
   "list_saved_repos",
@@ -371,5 +380,13 @@ server.tool(
   }
 );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+return server;
+};
+
+// Keep the stdio entry point when this file is run directly.
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const server = createRepoNotebookMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
