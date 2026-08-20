@@ -32,6 +32,8 @@ The plugin reads the same `notebook.json` the desktop app and the MCP server use
 
 ## Install
 
+Easiest for other people: via **BRAT** from the standalone repo [TMSHuybrechts/obsidian-repo-notebook](https://github.com/TMSHuybrechts/obsidian-repo-notebook) (generated from this folder by `scripts/sync-standalone.mjs`). From source:
+
 ```bash
 cd obsidian-plugin
 npm install

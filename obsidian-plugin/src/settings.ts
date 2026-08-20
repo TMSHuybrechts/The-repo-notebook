@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS: RepoNotebookSettings = {
   folder: "Repo Notebook",
   dataDir: "",
   serverUrl: "http://127.0.0.1:5188",
-  appExePath: "D:\\PROJECTS\\08_SCRIPTS_TOOLS\\RepoNotebook\\Repo Notebook.exe",
+  appExePath: "",
   githubToken: "",
   includeReadme: true,
   readmeMaxChars: 30000,
@@ -102,7 +102,7 @@ export class RepoNotebookSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Pad naar de desktop-app")
-      .setDesc("Repo Notebook.exe — voor het commando 'Start de Repo Notebook-app'.")
+      .setDesc("Volledig pad naar Repo Notebook.exe — voor het commando 'Start de Repo Notebook-app'. Leeg laten mag; dan start je de app zelf.")
       .addText((text) =>
         text.setValue(s.appExePath).onChange(async (value) => {
           s.appExePath = value.trim();
