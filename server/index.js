@@ -1463,10 +1463,10 @@ app.get("/api/updates-all", async (_req, res) => {
 });
 
 // --- Dubbel-detectie: staat een opgeslagen repo óók ergens anders gekloond
-// (bv. via repoget in D:\PROJECTS\GITHUB_REPOS)? Match op de remote-URL in
-// .git/config, met mapnaam als fallback. Cache 10 min. ---
+// (bv. in een eigen clones-map, opgegeven via RN_EXTRA_CLONE_DIRS)? Match op
+// de remote-URL in .git/config, met mapnaam als fallback. Cache 10 min. ---
 const extraCloneDirs = () =>
-  (process.env.RN_EXTRA_CLONE_DIRS || "D:\\PROJECTS\\GITHUB_REPOS")
+  (process.env.RN_EXTRA_CLONE_DIRS || "")
     .split(";")
     .map((dir) => dir.trim())
     .filter(Boolean);

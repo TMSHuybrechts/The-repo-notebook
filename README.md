@@ -57,7 +57,7 @@ Optional environment variables:
 - `RN_DATA_DIR` — data folder (default `%LOCALAPPDATA%\RepoNotebook\data`). `PORT` — server port (default 5188; the desktop app picks a free one).
 - `RN_AI_PROVIDER` — `ollama` (default, local, no tokens) · `anthropic` · `openai`. `RN_AI_MODEL` — model name. `RN_OLLAMA_URL` / `OLLAMA_HOST` — where Ollama listens. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENAI_BASE_URL` — only for those providers.
 - `RN_TERMINAL_SHELL` — shell for the embedded terminal (default `powershell.exe` on Windows, `$SHELL` elsewhere).
-- `RN_EXTRA_CLONE_DIRS` — extra folders (`;`-separated) scanned for duplicate clones (default: the author's `D:\PROJECTS\GITHUB_REPOS`; set your own or leave it — a missing folder is skipped).
+- `RN_EXTRA_CLONE_DIRS` — extra folders (`;`-separated) scanned for duplicate clones (default: none; a missing folder is skipped).
 
 ## Notes
 
