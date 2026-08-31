@@ -1658,6 +1658,11 @@ app.post("/api/verdicts/bulk", async (req, res) => {
   }
 });
 
+// Unknown /api/* paths get a JSON 404 instead of falling through to the SPA.
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: `Unknown API route: ${req.method} /api${req.path}` });
+});
+
 if (production) {
   const dist = path.join(root, "dist");
   app.use(express.static(dist));
