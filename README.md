@@ -1,5 +1,7 @@
 # Repo Notebook
 
+🌐 **Website:** [thomashuybrechts.com/repo-notebook](https://thomashuybrechts.com/repo-notebook/) · 👤 Built by [Thomas Huybrechts](https://thomashuybrechts.com/)
+
 Repo Notebook is a local desktop app (and plain Node app) for the GitHub repositories you want to *try*, not just star. Paste a URL and it saves the repo with metadata and README; one click more and it clones, detects how the project runs, installs it and starts it — with live logs, in one window. Everything stays on your machine in a single JSON file.
 
 ![Repo Notebook — knowledge-graph map](docs/img/kaart-overzicht.png)
