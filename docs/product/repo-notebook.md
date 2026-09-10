@@ -44,3 +44,16 @@ Clones are written under `data/clones/<owner>/<repo>`. If the target directory a
 - Replacing GitHub's full repository UI.
 - Running arbitrary shell commands from user input.
 - Cloning outside the app's controlled data directory.
+
+### Kaartinstellingen en clusterfilters
+
+In de kaartlegenda opent **Kaartinstellingen** de live bediening:
+
+- **Aantrekking**: 0–0,100, standaard 0,035. **Afstoting**: 0–6000, standaard 1500. Een wijziging brengt de bestaande simulatie opnieuw in beweging. **Reset physics** herstelt deze twee standaardwaarden zonder selectie, filters of zoom te wijzigen.
+- **Bolletjesgrootte**: vast, stars of aantal links (de bestaande standaard). De radius blijft tussen 6 en 15 kaartpixels; vaste grootte is 8. Het aantal links gebruikt de volledige graph, zodat filteren de grootte niet telkens verandert.
+- **Kleurmodus**: mono, twee statuskleuren (**Te proberen** versus **Overige statussen**, inclusief geen status), automatische clusterkleuren of handmatig per cluster. **Reset kleuren** herstelt de automatische kleuren en wist aangepaste kleuren.
+- Het **vinkje** naast een cluster verbergt/toont de nodes en alle bijbehorende verbindingen. Ook clusters met één node zijn beschikbaar. Klikken op de **clusternaam** behoudt het bestaande uitlichten. **Alle clusters tonen** herstelt alle filters.
+
+Physics, grootte en kleuren worden lokaal in de browser bewaard, ook na herladen of wisselen naar de lijst. Als opslag niet beschikbaar is, blijven de instellingen tijdens de gemounte kaart werken. Selectie, zoom en clusterfilters zijn tijdelijk; kleurwijzigingen resetten ze niet. Een verborgen geselecteerde node krijgt zijn informatiekaart terug wanneer zijn cluster opnieuw wordt getoond. Handmatige kleuren volgen de clusterleden; een opnieuw berekend cluster met andere leden krijgt de standaardkleur.
+
+Validatie: `node --test test/graph-settings.test.js` controleert herhaald filteren/herstellen zonder bronmutatie, begrensde groottes, kleurmodi, clusterhernummering en ongeldige opgeslagen instellingen. `npm run build` controleert de productiebuild.
