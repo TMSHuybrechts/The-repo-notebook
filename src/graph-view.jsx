@@ -2,12 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, EyeOff, List, Loader2, Maximize2, Network, Star, X } from "lucide-react";
 import { shortNumber } from "./format";
 
-// One colour per cluster — the "mappen" of the map.
-const CLUSTER_COLORS = [
-  "#2f81f7", "#4fd1a5", "#f0883e", "#d2a8ff", "#f2cc60", "#ff7b72",
-  "#79c0ff", "#56d364", "#e3b341", "#ffa198", "#a5d6ff", "#7ee787"
-];
-export const clusterColor = (index) => CLUSTER_COLORS[index % CLUSTER_COLORS.length];
+import { clusterColor, clusterKeys, DEFAULT_SETTINGS, loadGraphSettings, nodeColor, nodeRadius, SETTINGS_KEY, visibleGraph } from "./graph-settings.js";
+export { clusterColor } from "./graph-settings.js";
 
 // Human-readable "why are these linked" chips for an edge.
 export const edgeReasons = (edge) => {
@@ -28,7 +24,7 @@ const edgesFor = (graph, repoId) =>
 
 // Rows of related repos with reason chips — shared by the map info card and
 // the list-view "Verwant" panel.
-function RelatedRows({ graph, repoId, onSelect, limit = 6 }) {
+function RelatedRows({ graph, repoId, onSelect, limit = 6, colorFor = (node) => clusterColor(node.cluster) }) {
   const nodes = useMemo(() => new Map((graph?.nodes || []).map((node) => [node.id, node])), [graph]);
   const related = useMemo(() => edgesFor(graph, repoId).slice(0, limit), [graph, repoId, limit]);
 
@@ -41,7 +37,7 @@ function RelatedRows({ graph, repoId, onSelect, limit = 6 }) {
         return (
           <button className="related-row" key={edge.otherId} onClick={() => onSelect(other.id)} type="button">
             <span className="related-title">
-              <i style={{ background: clusterColor(other.cluster) }} />
+              <i style={{ background: colorFor(other) }} />
               <strong>{other.name}</strong>
               <small>{other.owner}</small>
               {edge.hidden && <span className="hidden-badge">verborgen link</span>}
@@ -75,8 +71,6 @@ export function RelatedPanel({ graph, repo, onSelect }) {
 // --- Force-directed map -----------------------------------------------------
 
 const SIM = {
-  springK: 0.035,
-  repulsion: 1500,
   clusterPull: 0.015,
   centerPull: 0.004,
   damping: 0.85,
@@ -84,7 +78,6 @@ const SIM = {
 };
 
 const restLength = (score) => 70 + (1 - score) * 100;
-const nodeRadius = (node) => 6 + Math.min(9, Math.sqrt(node.degree || 0) * 2.2);
 
 export function GraphView({ graph, loading, onOpenRepo }) {
   const wrapRef = useRef(null);
@@ -96,24 +89,56 @@ export function GraphView({ graph, loading, onOpenRepo }) {
   const [selectedId, setSelectedId] = useState("");
   const [focusCluster, setFocusCluster] = useState(null);
   const [onlyHidden, setOnlyHidden] = useState(false);
-  const stateRef = useRef({ selectedId, focusCluster, onlyHidden, graph });
-  stateRef.current = { selectedId, focusCluster, onlyHidden, graph };
+  const [settings, setSettings] = useState(loadGraphSettings);
+  const [hiddenClusters, setHiddenClusters] = useState(() => new Set());
+  const visible = useMemo(() => visibleGraph(graph, hiddenClusters), [graph, hiddenClusters]);
+  const visibleIds = useMemo(() => new Set(visible.nodes.map((node) => node.id)), [visible]);
+  const keys = useMemo(() => clusterKeys(graph), [graph]);
+  const colorFor = (node) => nodeColor(node, settings, keys);
+  const stateRef = useRef(null);
+  stateRef.current = { selectedId, focusCluster, onlyHidden, graph: visible, visibleIds, settings, keys };
+
+  useEffect(() => {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+    catch { /* Settings still work in memory when storage is unavailable. */ }
+  }, [settings]);
+
+  useEffect(() => {
+    simRef.current.alpha = Math.max(simRef.current.alpha, 0.5);
+  }, [settings.springK, settings.repulsion, visible]);
+
+  useEffect(() => {
+    if (!visibleIds.has(hoverRef.current)) hoverRef.current = "";
+    if (pointerRef.current.node && !visibleIds.has(pointerRef.current.node.id)) {
+      pointerRef.current = { mode: "", node: null, sx: 0, sy: 0, moved: 0 };
+    }
+  }, [visibleIds]);
+
+  const updateSetting = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const toggleCluster = (id) => setHiddenClusters((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const neighbours = useMemo(() => {
     const map = new Map();
-    for (const edge of graph?.edges || []) {
+    for (const edge of visible.edges) {
       map.set(edge.source, (map.get(edge.source) || new Set()).add(edge.target));
       map.set(edge.target, (map.get(edge.target) || new Set()).add(edge.source));
     }
     return map;
-  }, [graph]);
+  }, [visible]);
   const neighboursRef = useRef(neighbours);
   neighboursRef.current = neighbours;
 
   // (Re)seed the simulation whenever the graph changes: clusters start on a
   // ring so the groups are visible from the first frame.
   useEffect(() => {
-    if (!graph?.nodes?.length) return;
+    if (!graph?.nodes?.length) {
+      simRef.current = { nodes: [], byId: new Map(), anchors: new Map(), alpha: 0 };
+      return;
+    }
     const wrap = wrapRef.current;
     const width = wrap?.clientWidth || 1200;
     const height = wrap?.clientHeight || 700;
@@ -164,9 +189,10 @@ export function GraphView({ graph, loading, onOpenRepo }) {
 
     const step = () => {
       const sim = simRef.current;
-      const { graph: g } = stateRef.current;
+      const { graph: g, visibleIds: ids, settings: options } = stateRef.current;
       if (sim.alpha > SIM.minAlpha && sim.nodes.length) {
-        const { nodes, byId, anchors, alpha } = sim;
+        const { byId, anchors, alpha } = sim;
+        const nodes = sim.nodes.filter((node) => ids.has(node.id));
         for (const edge of g?.edges || []) {
           const a = byId.get(edge.source);
           const b = byId.get(edge.target);
@@ -174,7 +200,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const dist = Math.max(1, Math.hypot(dx, dy));
-          const force = (dist - restLength(edge.score)) * SIM.springK * (0.4 + edge.score) * alpha;
+          const force = (dist - restLength(edge.score)) * options.springK * (0.4 + edge.score) * alpha;
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
           a.vx += fx; a.vy += fy;
@@ -187,7 +213,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const d2 = Math.max(90, dx * dx + dy * dy);
-            const force = (SIM.repulsion / d2) * alpha;
+            const force = (options.repulsion / d2) * alpha;
             const dist = Math.sqrt(d2);
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
@@ -220,7 +246,10 @@ export function GraphView({ graph, loading, onOpenRepo }) {
       const dpr = window.devicePixelRatio || 1;
       const view = viewRef.current;
       const sim = simRef.current;
-      const { graph: g, selectedId: selected, focusCluster: focus, onlyHidden: hiddenOnly } = stateRef.current;
+      const { graph: g, selectedId, focusCluster, onlyHidden: hiddenOnly, visibleIds: ids, settings: options, keys: colorKeys } = stateRef.current;
+      const selected = ids.has(selectedId) ? selectedId : "";
+      const focus = g.nodes.some((node) => node.cluster === focusCluster) ? focusCluster : null;
+      const nodes = sim.nodes.filter((node) => ids.has(node.id));
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(dpr * view.k, 0, 0, dpr * view.k, dpr * view.x, dpr * view.y);
@@ -236,7 +265,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
         return 1;
       };
 
-      for (const node of sim.nodes) node.onHidden = false;
+      for (const node of nodes) node.onHidden = false;
       if (hiddenOnly) {
         for (const edge of g.edges) {
           if (!edge.hidden) continue;
@@ -267,11 +296,11 @@ export function GraphView({ graph, loading, onOpenRepo }) {
 
       const fontPx = Math.max(10, 11 / view.k);
       ctx.textAlign = "center";
-      for (const node of sim.nodes) {
+      for (const node of nodes) {
         const alpha = nodeAlpha(node);
-        const radius = nodeRadius(node);
+        const radius = nodeRadius(node, options.sizeMode);
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = clusterColor(node.cluster);
+        ctx.fillStyle = nodeColor(node, options, colorKeys);
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -305,7 +334,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
     return { x: (event.clientX - rect.left - view.x) / view.k, y: (event.clientY - rect.top - view.y) / view.k };
   };
   const hitNode = (point) =>
-    simRef.current.nodes.findLast((node) => Math.hypot(node.x - point.x, node.y - point.y) <= nodeRadius(node) + 4);
+    simRef.current.nodes.findLast((node) => visibleIds.has(node.id) && Math.hypot(node.x - point.x, node.y - point.y) <= nodeRadius(node, settings.sizeMode) + 4);
 
   const onPointerDown = (event) => {
     const point = toWorld(event);
@@ -371,8 +400,8 @@ export function GraphView({ graph, loading, onOpenRepo }) {
     simRef.current.alpha = Math.max(simRef.current.alpha, 0.2);
   };
 
-  const selectedNode = graph?.nodes.find((node) => node.id === selectedId);
-  const hiddenCount = graph?.edges.filter((edge) => edge.hidden).length || 0;
+  const selectedNode = visible.nodes.find((node) => node.id === selectedId);
+  const hiddenCount = visible.edges.filter((edge) => edge.hidden).length || 0;
 
   return (
     <div className="graph-view" ref={wrapRef}>
@@ -381,6 +410,9 @@ export function GraphView({ graph, loading, onOpenRepo }) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={() => { pointerRef.current = { mode: "", node: null, sx: 0, sy: 0, moved: 0 }; }}
+        onPointerLeave={() => { hoverRef.current = ""; }}
+        aria-label="Interactieve repositorykaart"
         onWheel={onWheel}
         ref={canvasRef}
       />
@@ -390,31 +422,80 @@ export function GraphView({ graph, loading, onOpenRepo }) {
       {graph && (
         <aside className="graph-legend">
           <h3><Network size={15} /> Clusters</h3>
-          {graph.clusters.filter((cluster) => cluster.size > 1).map((cluster) => (
-            <button
-              className={focusCluster === cluster.id ? "active" : ""}
-              key={cluster.id}
-              onClick={() => setFocusCluster((current) => (current === cluster.id ? null : cluster.id))}
-              type="button"
-            >
-              <i style={{ background: clusterColor(cluster.id) }} />
-              <span>{cluster.label}</span>
-              <small>{cluster.size}</small>
-            </button>
+          <p className="graph-count" aria-live="polite">{visible.nodes.length} / {graph.nodes.length} repos · {visible.edges.length} links</p>
+          {graph.clusters.map((cluster) => (
+            <div className="graph-cluster-row" key={cluster.id}>
+              <input type="checkbox" checked={!hiddenClusters.has(cluster.id)}
+                aria-label={`Toon cluster ${cluster.label}`}
+                onChange={() => toggleCluster(cluster.id)} />
+              <button
+                className={focusCluster === cluster.id ? "active" : ""}
+                disabled={hiddenClusters.has(cluster.id)}
+                aria-pressed={focusCluster === cluster.id}
+                title="Cluster uitlichten"
+                onClick={() => setFocusCluster((current) => current === cluster.id ? null : cluster.id)}
+                type="button"
+              >
+                <i style={{ background: settings.colorMode === "status" ? `linear-gradient(90deg, ${settings.todoColor} 50%, ${settings.otherColor} 50%)` : colorFor({ cluster: cluster.id }) }} />
+                <span>{cluster.label}</span><small>{cluster.size}</small>
+              </button>
+            </div>
           ))}
+          {!!hiddenClusters.size && <button type="button" onClick={() => setHiddenClusters(new Set())}>Alle clusters tonen</button>}
+          <details className="graph-settings">
+            <summary>Kaartinstellingen</summary>
+            <label>Aantrekking <output>{settings.springK.toFixed(3)}</output>
+              <input aria-label="Aantrekking" type="range" min="0" max="0.1" step="0.005" value={settings.springK}
+                onChange={(event) => updateSetting("springK", Number(event.target.value))} />
+            </label>
+            <label>Afstoting <output>{settings.repulsion}</output>
+              <input aria-label="Afstoting" type="range" min="0" max="6000" step="100" value={settings.repulsion}
+                onChange={(event) => updateSetting("repulsion", Number(event.target.value))} />
+            </label>
+            <button type="button" onClick={() => setSettings((current) => ({ ...current, springK: DEFAULT_SETTINGS.springK, repulsion: DEFAULT_SETTINGS.repulsion }))}>Reset physics</button>
+            <label>Bolletjesgrootte
+              <select aria-label="Bolletjesgrootte" value={settings.sizeMode} onChange={(event) => updateSetting("sizeMode", event.target.value)}>
+                <option value="fixed">Vast</option><option value="stars">Stars</option><option value="degree">Aantal links</option>
+              </select>
+            </label>
+            <label>Kleurmodus
+              <select aria-label="Kleurmodus" value={settings.colorMode} onChange={(event) => updateSetting("colorMode", event.target.value)}>
+                <option value="mono">Mono</option><option value="status">2 kleuren (status)</option>
+                <option value="cluster">Per cluster</option><option value="manual">Handmatig per cluster</option>
+              </select>
+            </label>
+            {settings.colorMode === "mono" && <label className="graph-color">Alle nodes
+              <input type="color" value={settings.monoColor} onChange={(event) => updateSetting("monoColor", event.target.value)} />
+            </label>}
+            {settings.colorMode === "status" && <>
+              <label className="graph-color">Te proberen<input type="color" value={settings.todoColor} onChange={(event) => updateSetting("todoColor", event.target.value)} /></label>
+              <label className="graph-color">Overige statussen<input type="color" value={settings.otherColor} onChange={(event) => updateSetting("otherColor", event.target.value)} /></label>
+            </>}
+            {settings.colorMode === "manual" && graph.clusters.map((cluster) => (
+              <label className="graph-color" key={cluster.id}>{cluster.label}
+                <input type="color" aria-label={`Kleur ${cluster.label}`} value={colorFor({ cluster: cluster.id })}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setSettings((current) => ({ ...current, clusterColors: { ...current.clusterColors, [keys.get(cluster.id)]: value } }));
+                  }} />
+              </label>
+            ))}
+            <button type="button" onClick={() => setSettings((current) => ({ ...current, colorMode: DEFAULT_SETTINGS.colorMode, monoColor: DEFAULT_SETTINGS.monoColor, todoColor: DEFAULT_SETTINGS.todoColor, otherColor: DEFAULT_SETTINGS.otherColor, clusterColors: {} }))}>Reset kleuren</button>
+            <p className="legend-hint">Grootte blijft begrensd. Instellingen worden op dit apparaat bewaard.</p>
+          </details>
           <div className="legend-actions">
             <button className={onlyHidden ? "active" : ""} onClick={() => setOnlyHidden((v) => !v)} type="button">
               <EyeOff size={13} /> Verborgen links ({hiddenCount})
             </button>
             <button onClick={resetView} title="Zoom terugzetten" type="button"><Maximize2 size={13} /></button>
           </div>
-          <p className="legend-hint">Klik = selecteer · dubbelklik = open in lijst · sleep = verplaats</p>
+          <p className="legend-hint">Vinkje = tonen/verbergen · clusternaam = uitlichten · klik node = selecteer · dubbelklik = open · sleep = verplaats</p>
         </aside>
       )}
       {selectedNode && (
         <aside className="graph-card">
           <div className="graph-card-head">
-            <i style={{ background: clusterColor(selectedNode.cluster) }} />
+            <i style={{ background: colorFor(selectedNode) }} />
             <strong>{selectedNode.name}</strong>
             <button className="icon" onClick={() => setSelectedId("")} type="button"><X size={15} /></button>
           </div>
@@ -428,7 +509,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
             <a href={`https://github.com/${selectedNode.fullName}`} rel="noreferrer" target="_blank"><ExternalLink size={14} /> GitHub</a>
           </div>
           <h4>Gelinkt met</h4>
-          <RelatedRows graph={graph} limit={8} onSelect={setSelectedId} repoId={selectedNode.id} />
+          <RelatedRows colorFor={colorFor} graph={visible} limit={8} onSelect={setSelectedId} repoId={selectedNode.id} />
         </aside>
       )}
     </div>
