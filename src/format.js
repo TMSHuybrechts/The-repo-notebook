@@ -1,18 +1,20 @@
+import { getLocale, t } from "./i18n.js";
+
 export const letters = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 export const repoLetter = (repo) => (/^[A-Z]/i.test(repo.name) ? repo.name[0].toUpperCase() : "#");
 
 export const shortNumber = (value = 0) =>
-  Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  Intl.NumberFormat(getLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
 export const shortDate = (date) =>
   date
-    ? Intl.DateTimeFormat("nl-BE", {
+    ? Intl.DateTimeFormat(getLocale() === "nl" ? "nl-BE" : "en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric"
       }).format(new Date(date))
-    : "Onbekend";
+    : t("Onbekend");
 
 export const fileSize = (size = 0) => {
   if (!size) return "";

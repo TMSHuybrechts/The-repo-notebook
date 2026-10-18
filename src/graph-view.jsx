@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, EyeOff, List, Loader2, Maximize2, Network, Plus, Sparkles, Star, X } from "lucide-react";
 import { shortNumber } from "./format";
@@ -9,10 +10,10 @@ export { clusterColor } from "./graph-settings.js";
 export const edgeReasons = (edge) => {
   const reasons = [];
   if (edge.sharedTopics?.length) reasons.push({ kind: "topics", label: edge.sharedTopics.slice(0, 3).join(" · ") });
-  if (edge.sameCategory) reasons.push({ kind: "flag", label: "zelfde categorie" });
-  if (edge.sameOwner) reasons.push({ kind: "flag", label: "zelfde maker" });
-  if (edge.sharedTerms?.length) reasons.push({ kind: "text", label: `tekst: ${edge.sharedTerms.slice(0, 3).join(", ")}` });
-  if (edge.sameLanguage && !edge.sharedTopics?.length) reasons.push({ kind: "flag", label: "zelfde taal" });
+  if (edge.sameCategory) reasons.push({ kind: "flag", label: t("zelfde categorie") });
+  if (edge.sameOwner) reasons.push({ kind: "flag", label: t("zelfde maker") });
+  if (edge.sharedTerms?.length) reasons.push({ kind: "text", label: t("tekst: {0}", [edge.sharedTerms.slice(0, 3).join(", ")]) });
+  if (edge.sameLanguage && !edge.sharedTopics?.length) reasons.push({ kind: "flag", label: t("zelfde taal") });
   return reasons;
 };
 
@@ -28,7 +29,7 @@ function RelatedRows({ graph, repoId, onSelect, limit = 6, colorFor = (node) => 
   const nodes = useMemo(() => new Map((graph?.nodes || []).map((node) => [node.id, node])), [graph]);
   const related = useMemo(() => edgesFor(graph, repoId).slice(0, limit), [graph, repoId, limit]);
 
-  if (!related.length) return <p className="muted">Nog geen verwante repos gevonden.</p>;
+  if (!related.length) return <p className="muted">{t("Nog geen verwante repos gevonden.")}</p>;
   return (
     <div className="related-rows">
       {related.map((edge) => {
@@ -40,7 +41,7 @@ function RelatedRows({ graph, repoId, onSelect, limit = 6, colorFor = (node) => 
               <i style={{ background: colorFor(other) }} />
               <strong>{other.name}</strong>
               <small>{other.owner}</small>
-              {edge.hidden && <span className="hidden-badge">verborgen link</span>}
+              {edge.hidden && <span className="hidden-badge">{t("verborgen link")}</span>}
               <span className="related-score">{Math.round(edge.score * 100)}%</span>
             </span>
             <span className="related-reasons">
@@ -61,7 +62,7 @@ export function RelatedPanel({ graph, repo, onSelect }) {
   return (
     <section className="panel related">
       <div className="panel-head">
-        <h2><Network size={16} /> Verwante repos</h2>
+        <h2><Network size={16} />{" "}{t("Verwante repos")}</h2>
       </div>
       <RelatedRows graph={graph} onSelect={onSelect} repoId={repo.id} />
     </section>
@@ -486,12 +487,12 @@ export function GraphView({ graph, loading, onOpenRepo, busy = "", suggestions =
         onPointerUp={onPointerUp}
         onPointerCancel={() => { pointerRef.current = { mode: "", node: null, sx: 0, sy: 0, moved: 0 }; }}
         onPointerLeave={() => { hoverRef.current = ""; }}
-        aria-label="Interactieve repositorykaart"
+        aria-label={t("Interactieve repositorykaart")}
         onWheel={onWheel}
         ref={canvasRef}
       />
       {loading && (
-        <div className="graph-loading"><Loader2 className="spin" size={22} /> Kaart berekenen...</div>
+        <div className="graph-loading"><Loader2 className="spin" size={22} />{" "}{t("Kaart berekenen...")}</div>
       )}
       {graph && (
         <aside className="graph-legend">
@@ -500,13 +501,13 @@ export function GraphView({ graph, loading, onOpenRepo, busy = "", suggestions =
           {graph.clusters.map((cluster) => (
             <div className="graph-cluster-row" key={cluster.id}>
               <input type="checkbox" checked={!hiddenClusters.has(cluster.id)}
-                aria-label={`Toon cluster ${cluster.label}`}
+                aria-label={t("Toon cluster {0}", [cluster.label])}
                 onChange={() => toggleCluster(cluster.id)} />
               <button
                 className={focusCluster === cluster.id ? "active" : ""}
                 disabled={hiddenClusters.has(cluster.id)}
                 aria-pressed={focusCluster === cluster.id}
-                title="Cluster uitlichten"
+                title={t("Cluster uitlichten")}
                 onClick={() => setFocusCluster((current) => current === cluster.id ? null : cluster.id)}
                 type="button"
               >
@@ -515,69 +516,69 @@ export function GraphView({ graph, loading, onOpenRepo, busy = "", suggestions =
               </button>
             </div>
           ))}
-          {!!hiddenClusters.size && <button type="button" onClick={() => setHiddenClusters(new Set())}>Alle clusters tonen</button>}
+          {!!hiddenClusters.size && <button type="button" onClick={() => setHiddenClusters(new Set())}>{t("Alle clusters tonen")}</button>}
           <details className="graph-settings">
-            <summary>Kaartinstellingen</summary>
-            <label>Aantrekking <output>{settings.springK.toFixed(3)}</output>
-              <input aria-label="Aantrekking" type="range" min="0" max="0.1" step="0.005" value={settings.springK}
+            <summary>{t("Kaartinstellingen")}</summary>
+            <label>{t("Aantrekking")} <output>{settings.springK.toFixed(3)}</output>
+              <input aria-label={t("Aantrekking")} type="range" min="0" max="0.1" step="0.005" value={settings.springK}
                 onChange={(event) => updateSetting("springK", Number(event.target.value))} />
             </label>
-            <label>Afstoting <output>{settings.repulsion}</output>
-              <input aria-label="Afstoting" type="range" min="0" max="6000" step="100" value={settings.repulsion}
+            <label>{t("Afstoting")} <output>{settings.repulsion}</output>
+              <input aria-label={t("Afstoting")} type="range" min="0" max="6000" step="100" value={settings.repulsion}
                 onChange={(event) => updateSetting("repulsion", Number(event.target.value))} />
             </label>
             <button type="button" onClick={() => setSettings((current) => ({ ...current, springK: DEFAULT_SETTINGS.springK, repulsion: DEFAULT_SETTINGS.repulsion }))}>Reset physics</button>
-            <label>Bolletjesgrootte
-              <select aria-label="Bolletjesgrootte" value={settings.sizeMode} onChange={(event) => updateSetting("sizeMode", event.target.value)}>
-                <option value="fixed">Vast</option><option value="stars">Stars</option><option value="degree">Aantal links</option>
+            <label>{t("Bolletjesgrootte")}
+              <select aria-label={t("Bolletjesgrootte")} value={settings.sizeMode} onChange={(event) => updateSetting("sizeMode", event.target.value)}>
+                <option value="fixed">{t("Vast")}</option><option value="stars">Stars</option><option value="degree">{t("Aantal links")}</option>
               </select>
             </label>
-            <label>Kleurmodus
-              <select aria-label="Kleurmodus" value={settings.colorMode} onChange={(event) => updateSetting("colorMode", event.target.value)}>
-                <option value="mono">Mono</option><option value="status">2 kleuren (status)</option>
-                <option value="cluster">Per cluster</option><option value="manual">Handmatig per cluster</option>
+            <label>{t("Kleurmodus")}
+              <select aria-label={t("Kleurmodus")} value={settings.colorMode} onChange={(event) => updateSetting("colorMode", event.target.value)}>
+                <option value="mono">Mono</option><option value="status">{t("2 kleuren (status)")}</option>
+                <option value="cluster">Per cluster</option><option value="manual">{t("Handmatig per cluster")}</option>
               </select>
             </label>
-            {settings.colorMode === "mono" && <label className="graph-color">Alle nodes
+            {settings.colorMode === "mono" && <label className="graph-color">{t("Alle nodes")}
               <input type="color" value={settings.monoColor} onChange={(event) => updateSetting("monoColor", event.target.value)} />
             </label>}
             {settings.colorMode === "status" && <>
-              <label className="graph-color">Te proberen<input type="color" value={settings.todoColor} onChange={(event) => updateSetting("todoColor", event.target.value)} /></label>
-              <label className="graph-color">Overige statussen<input type="color" value={settings.otherColor} onChange={(event) => updateSetting("otherColor", event.target.value)} /></label>
+              <label className="graph-color">{t("Te proberen")}<input type="color" value={settings.todoColor} onChange={(event) => updateSetting("todoColor", event.target.value)} /></label>
+              <label className="graph-color">{t("Overige statussen")}<input type="color" value={settings.otherColor} onChange={(event) => updateSetting("otherColor", event.target.value)} /></label>
             </>}
             {settings.colorMode === "manual" && graph.clusters.map((cluster) => (
               <label className="graph-color" key={cluster.id}>{cluster.label}
-                <input type="color" aria-label={`Kleur ${cluster.label}`} value={colorFor({ cluster: cluster.id })}
+                <input type="color" aria-label={t("Kleur {0}", [cluster.label])} value={colorFor({ cluster: cluster.id })}
                   onChange={(event) => {
                     const value = event.target.value;
                     setSettings((current) => ({ ...current, clusterColors: { ...current.clusterColors, [keys.get(cluster.id)]: value } }));
                   }} />
               </label>
             ))}
-            <button type="button" onClick={() => setSettings((current) => ({ ...current, colorMode: DEFAULT_SETTINGS.colorMode, monoColor: DEFAULT_SETTINGS.monoColor, todoColor: DEFAULT_SETTINGS.todoColor, otherColor: DEFAULT_SETTINGS.otherColor, clusterColors: {} }))}>Reset kleuren</button>
-            <p className="legend-hint">Grootte blijft begrensd. Instellingen worden op dit apparaat bewaard.</p>
+            <button type="button" onClick={() => setSettings((current) => ({ ...current, colorMode: DEFAULT_SETTINGS.colorMode, monoColor: DEFAULT_SETTINGS.monoColor, todoColor: DEFAULT_SETTINGS.todoColor, otherColor: DEFAULT_SETTINGS.otherColor, clusterColors: {} }))}>{t("Reset kleuren")}</button>
+            <p className="legend-hint">{t("Grootte blijft begrensd. Instellingen worden op dit apparaat bewaard.")}</p>
           </details>
           <div className="legend-actions">
             <button className={onlyHidden ? "active" : ""} onClick={() => setOnlyHidden((v) => !v)} type="button">
-              <EyeOff size={13} /> Verborgen links ({hiddenCount})
+              <EyeOff size={13} />{" "}{t("Verborgen links (")}{hiddenCount})
             </button>
-            <button onClick={resetView} title="Zoom terugzetten" type="button"><Maximize2 size={13} /></button>
+            <button onClick={resetView} title={t("Zoom terugzetten")} type="button"><Maximize2 size={13} /></button>
           </div>
           <div className="legend-actions">
             <button
               className={showSuggestions ? "active" : ""}
               onClick={toggleSuggestions}
-              title="Persoonlijke suggesties van GitHub tussen je eigen repos — gescoord op je smaak (Bevalt weegt zwaarst)"
+              title={t("Persoonlijke suggesties van GitHub tussen je eigen repos — gescoord op je smaak (Bevalt weegt zwaarst)")}
               type="button"
             >
               {suggestionsLoading ? <Loader2 className="spin" size={13} /> : <Sparkles size={13} />}
-              {" "}Suggesties{suggestionCount != null ? ` (${suggestionCount})` : ""}
+              {" "}{t("Suggesties")}{suggestionCount != null ? ` (${suggestionCount})` : ""}
             </button>
           </div>
           {showSuggestions && !suggestionsLoading && suggestions && suggestionCount === 0 && (
-            <p className="legend-hint">{suggestions.note || "Geen nieuwe suggesties gevonden — probeer straks opnieuw."}</p>
+            <p className="legend-hint">{t(suggestions.note || "Geen nieuwe suggesties gevonden — probeer straks opnieuw.")}</p>
           )}
-          <p className="legend-hint">Vinkje = tonen/verbergen · clusternaam = uitlichten · klik node = selecteer · dubbelklik = open · sleep = verplaats</p>
+          <p className="legend-hint">{t("Vinkje = tonen/verbergen · clusternaam = uitlichten · klik node = selecteer · dubbelklik = open · sleep = verplaats")}</p>
         </aside>
       )}
       {selectedNode && (
@@ -601,14 +602,14 @@ export function GraphView({ graph, loading, onOpenRepo, busy = "", suggestions =
                 onClick={() => onSaveSuggestion?.(selectedNode)}
                 type="button"
               >
-                {busy === `suggest:${selectedNode.id}` ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} Bewaren in Notebook
+                {busy === `suggest:${selectedNode.id}` ? <Loader2 className="spin" size={14} /> : <Plus size={14} />}{" "}{t("Bewaren in Notebook")}
               </button>
             ) : (
-              <button className="primary" onClick={() => onOpenRepo(selectedNode.id)} type="button"><List size={14} /> Open in lijst</button>
+              <button className="primary" onClick={() => onOpenRepo(selectedNode.id)} type="button"><List size={14} />{" "}{t("Open in lijst")}</button>
             )}
             <a href={`https://github.com/${selectedNode.fullName}`} rel="noreferrer" target="_blank"><ExternalLink size={14} /> GitHub</a>
           </div>
-          <h4>{selectedNode.suggested ? "Past bij" : "Gelinkt met"}</h4>
+          <h4>{t(selectedNode.suggested ? "Past bij" : "Gelinkt met")}</h4>
           <RelatedRows colorFor={colorFor} graph={visible} limit={8} onSelect={setSelectedId} repoId={selectedNode.id} />
         </aside>
       )}
