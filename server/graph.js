@@ -57,7 +57,9 @@ const BONUS_OWNER = 0.25;
 const BONUS_LANGUAGE = 0.05;
 
 // Term profile per repo: name parts + description (weighted) + README excerpt.
-const buildProfile = (repo) => {
+// Exported (with idfMap/vectorNorms/pairScore) for suggest.js, so suggestions
+// are scored by exactly the same engine as the map.
+export const buildProfile = (repo) => {
   const terms = new Map();
   const bump = (word, weight) => terms.set(word, (terms.get(word) || 0) + weight);
   tokenize(repo.name.replace(/[-_.]/g, " ")).forEach((word) => bump(word, NAME_WEIGHT));
@@ -75,7 +77,7 @@ const buildProfile = (repo) => {
 
 // Inverse document frequency: rare shared signals weigh more than "ai" or "llm"
 // that half the shelf shares.
-const idfMap = (documents) => {
+export const idfMap = (documents) => {
   const df = new Map();
   for (const doc of documents) {
     for (const item of doc) df.set(item, (df.get(item) || 0) + 1);
@@ -124,7 +126,17 @@ const textSimilarity = (a, b, idf, vectorNorm) => {
   };
 };
 
-const pairScore = (a, b, topicIdf, termIdf, vectorNorm) => {
+// TF-IDF vector length per profile, for cosine normalisation in textSimilarity.
+export const vectorNorms = (profiles, termIdf) =>
+  new Map(
+    profiles.map((p) => {
+      let sum = 0;
+      for (const [word, tf] of p.terms) sum += ((termIdf.get(word) || 0) * tf) ** 2;
+      return [p.id, Math.sqrt(sum)];
+    })
+  );
+
+export const pairScore = (a, b, topicIdf, termIdf, vectorNorm) => {
   const topics = topicSimilarity(a, b, topicIdf);
   const text = textSimilarity(a, b, termIdf, vectorNorm);
   const sameCategory = Boolean(a.category && a.category === b.category);
@@ -215,13 +227,7 @@ export const buildGraph = (repos) => {
   const byId = new Map(profiles.map((p) => [p.id, p]));
   const topicIdf = idfMap(profiles.map((p) => p.topics));
   const termIdf = idfMap(profiles.map((p) => [...p.terms.keys()]));
-  const vectorNorm = new Map(
-    profiles.map((p) => {
-      let sum = 0;
-      for (const [word, tf] of p.terms) sum += ((termIdf.get(word) || 0) * tf) ** 2;
-      return [p.id, Math.sqrt(sum)];
-    })
-  );
+  const vectorNorm = vectorNorms(profiles, termIdf);
 
   // Score all pairs, then keep each node's strongest links so the map stays
   // readable instead of one hairball. A node whose best link falls below the

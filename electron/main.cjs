@@ -21,6 +21,22 @@ const dataDir = path.join(baseDir, "RepoNotebook", "data");
 let serverProc = null;
 let serverPort = 0;
 
+// Only one Repo Notebook at a time: a second launch loses the race for the
+// server port (EADDRINUSE) and ends in the 30s timeout dialog. Hand focus to
+// the window that is already open instead.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const [win] = BrowserWindow.getAllWindows();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 // Prefer the well-known dev port so bookmarks/clients keep working; fall back
 // to any free port when something else (e.g. `npm run dev`) already has it.
 const freePort = (preferred = 5188) =>
@@ -70,7 +86,7 @@ const waitForServer = (port, proc) =>
         return;
       }
       const req = http.get(
-        { host: "127.0.0.1", port, path: "/api/config", timeout: 800 },
+        { host: "127.0.0.1", port, path: "/api/health", timeout: 800 },
         (res) => {
           res.resume();
           res.once("end", () => {
@@ -130,6 +146,16 @@ const createWindow = async () => {
     webPreferences: { contextIsolation: true, nodeIntegration: false }
   });
 
+  // Electron blokkeert clipboard-read standaard in de renderer, waardoor de
+  // auto-plak (navigator.clipboard.readText) stil faalt. Onze UI is puur lokaal
+  // (127.0.0.1), dus we staan enkel de klembord-permissies toe.
+  const allowClip = (permission) =>
+    permission === "clipboard-read" ||
+    permission === "clipboard-sanitized-write" ||
+    permission === "clipboard-write";
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, cb) => cb(allowClip(permission)));
+  win.webContents.session.setPermissionCheckHandler((_wc, permission) => allowClip(permission));
+
   // Open GitHub / external links in the real browser, not inside the app window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
@@ -176,6 +202,7 @@ const killServer = () => {
 };
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   seedData();
   try {
     await startServer();

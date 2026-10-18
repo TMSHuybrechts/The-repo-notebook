@@ -18,9 +18,12 @@ import {
   GitFork,
   Github,
   Globe,
+  GripHorizontal,
   HardDriveDownload,
   List,
   Loader2,
+  Maximize2,
+  Minus,
   Network,
   PackageCheck,
   Play,
@@ -31,13 +34,14 @@ import {
   Sparkles,
   Square,
   Star,
+  Stethoscope,
   Terminal,
   Trash2,
   Upload,
   X,
   Zap
 } from "lucide-react";
-import { bulkSave, bulkVerdictStatus, checkUpdates, clearTerminal, cloneRepo, deleteClone, dockerStart, dockerStatus, dockerStop, importNotebook, importStars, installRepo, loadConfig, loadDuplicates, loadEnv, loadGraph, loadLog, loadMcpStatus, loadNotebook, loadRuntime, loadTerminal, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveEnv, saveRepo, sendTerminalInput, setRepoMeta, startBulkVerdicts, startContainer, startRepo, startTerminal, stopRepo, stopTerminal } from "./api";
+import { bulkSave, bulkVerdictStatus, checkUpdates, clearTerminal, cloneRepo, deleteClone, diagnoseRepo, dockerStart, dockerStatus, dockerStop, harvest, importNotebook, importStars, installRepo, loadConfig, loadDuplicates, loadEnv, loadGraph, loadLog, loadMcpStatus, loadNotebook, loadRuntime, loadSuggestions, loadTerminal, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveEnv, saveRepo, sendTerminalInput, setRepoMeta, startBulkVerdicts, startContainer, startRepo, startTerminal, stopRepo, stopTerminal } from "./api";
 import { GraphView, RelatedPanel } from "./graph-view.jsx";
 import { QuickstartView } from "./quickstart.jsx";
 import { fileSize, languageColor, letters, repoLetter, shortDate, shortNumber } from "./format";
@@ -198,6 +202,8 @@ function App() {
   const [view, setView] = useState("list");
   const [graph, setGraph] = useState(null);
   const [graphLoading, setGraphLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [dups, setDups] = useState({});
   const [aiJob, setAiJob] = useState(null);
 
@@ -376,6 +382,23 @@ function App() {
 
   const saveTrending = (repo) => saveUrl(repo.htmlUrl, { busy: `trend:${repo.id}` });
 
+  // Suggestions for the map: fetched lazily the first time the toggle goes on.
+  const fetchSuggestions = async (refresh = false) => {
+    if (suggestionsLoading) return;
+    setSuggestionsLoading(true);
+    setError("");
+    try {
+      setSuggestions(await loadSuggestions(refresh));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const saveSuggestion = (node) =>
+    saveUrl(node.htmlUrl || `https://github.com/${node.fullName}`, { busy: `suggest:${node.id}` });
+
   const refresh = async () => {
     if (!selected) return;
     setBusy("refresh");
@@ -454,15 +477,31 @@ function App() {
           <button className={view === "run" ? "active" : ""} onClick={() => setView("run")} type="button">
             <Zap size={15} /> Snelstart
           </button>
+          <button className={view === "harvest" ? "active" : ""} onClick={() => setView("harvest")} type="button">
+            <Globe size={15} /> Oogst
+          </button>
         </div>
       </div>
       {view === "map" ? (
         <section className="workspace map-mode">
-          <GraphView graph={graph} loading={graphLoading} onOpenRepo={openFromMap} />
+          <GraphView
+            busy={busy}
+            graph={graph}
+            loading={graphLoading}
+            onLoadSuggestions={fetchSuggestions}
+            onOpenRepo={openFromMap}
+            onSaveSuggestion={saveSuggestion}
+            suggestions={suggestions}
+            suggestionsLoading={suggestionsLoading}
+          />
         </section>
       ) : view === "run" ? (
         <section className="workspace map-mode">
           <QuickstartView dups={dups} onOpenRepo={openFromMap} />
+        </section>
+      ) : view === "harvest" ? (
+        <section className="workspace map-mode">
+          <HarvestView onRepos={(items) => setRepos(sorted(items))} repos={repos} setNotice={setNotice} />
         </section>
       ) : (
       <section className="workspace">
@@ -516,7 +555,27 @@ function App() {
   );
 }
 
+function looksLikeRepoUrl(text) {
+  return /github\.com[/:][^/\s]+\/[^/\s]+/i.test(text || "");
+}
+
 function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, setUrl, url }) {
+  const autoPasteFromClipboard = async () => {
+    if (url.trim()) return; // niet overschrijven wat er al staat
+    try {
+      const text = (await navigator.clipboard?.readText())?.trim();
+      if (text && looksLikeRepoUrl(text)) setUrl(text);
+    } catch {
+      // klembord niet leesbaar (permissie/focus) — stil negeren
+    }
+  };
+  // Ook auto-plakken zodra het venster terug focus krijgt (alt-tab / aanklikken),
+  // niet enkel bij een klik in het veld. Klik blijft als vangnet.
+  useEffect(() => {
+    const onFocus = () => { autoPasteFromClipboard(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }); // elke render opnieuw: sluit correct over de actuele url-guard
   return (
     <header className="topbar">
       <div className="brand">
@@ -530,7 +589,8 @@ function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, 
         <input
           aria-label="GitHub repository URL"
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="GitHub repo-URL plakken"
+          onClick={autoPasteFromClipboard}
+          placeholder="GitHub repo-URL plakken (klik = auto-plak)"
           value={url}
         />
         <button className="primary" disabled={busy === "save"}>
@@ -553,6 +613,182 @@ function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, 
       {error && <div className="toast">{error}</div>}
       {!error && notice && <div className="toast notice">{notice}</div>}
     </header>
+  );
+}
+
+const HARVEST_TAGS = {
+  eigen: { label: "eigen repo", color: "#3fb950" },
+  star: { label: "gestard", color: "#d29922" },
+  zoek: { label: "gezocht", color: "#58a6ff" },
+  link: { label: "link", color: "#bc8cff" }
+};
+const HARVEST_MODE_LABEL = {
+  account: "Account → eigen repos + stars",
+  links: "Links uit de tekst",
+  search: "GitHub-zoek op naam",
+  mixed: "Links + naam-zoek",
+  page: "Pagina opgehaald → links eruit"
+};
+
+// Oogst: haal repos op uit een GitHub-account, uit geplakte tool-namen/tekst,
+// of uit een pagina-URL — tijdelijk, kies wat je wilt, dan naar de notebook.
+function HarvestView({ onRepos, repos, setNotice }) {
+  const [source, setSource] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
+
+  const have = useMemo(() => new Set((repos || []).map((r) => r.id)), [repos]);
+  const candidates = result?.candidates || [];
+  const freshIds = useMemo(() => candidates.filter((c) => !have.has(c.id)).map((c) => c.id), [candidates, have]);
+
+  const run = async (event) => {
+    event?.preventDefault?.();
+    const src = source.trim();
+    if (!src || loading) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const data = await harvest(src);
+      setResult(data);
+      setPicked(new Set((data.candidates || []).filter((c) => !have.has(c.id)).map((c) => c.id)));
+    } catch (err) {
+      setError(err.message || "Ophalen mislukt.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = (id) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const save = async () => {
+    const slugs = candidates.filter((c) => picked.has(c.id)).map((c) => `${c.owner}/${c.name}`);
+    if (!slugs.length || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const res = await bulkSave(slugs.join("\n"));
+      onRepos(res.repos);
+      setNotice(`Oogst binnen: ${res.added.length} nieuw${res.existed.length ? `, ${res.existed.length} bestonden al` : ""}${res.failed.length ? `, ${res.failed.length} mislukt` : ""}.`);
+      setResult(null);
+      setSource("");
+      setPicked(new Set());
+    } catch (err) {
+      setError(err.message || "Bewaren mislukt.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="harvest">
+      <style>{`
+        .harvest { padding: 20px 24px; max-width: 1020px; margin: 0 auto; width: 100%; overflow-y: auto; color: #e6edf3; }
+        .harvest-intro h2 { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:1.15rem; }
+        .harvest-intro p { margin:0 0 16px; color:#8b949e; line-height:1.55; font-size:.9rem; }
+        .harvest-intro code { background:#161b22; border:1px solid #30363d; border-radius:5px; padding:1px 6px; color:#e6edf3; font-size:.85em; }
+        .harvest-form { display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
+        .harvest-form textarea { flex:1; background:#0d1117; border:1px solid #30363d; border-radius:10px; color:#e6edf3; padding:10px 12px; font-family:inherit; font-size:.9rem; resize:vertical; min-height:66px; }
+        .harvest-form textarea:focus { outline:none; border-color:#58a6ff; }
+        .harvest-bar { display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:.85rem; color:#8b949e; flex-wrap:wrap; }
+        .harvest-mode { background:rgba(31,111,235,.13); color:#58a6ff; border:1px solid rgba(31,111,235,.35); border-radius:20px; padding:3px 10px; font-weight:600; }
+        .harvest-note { background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.35); color:#e3b341; border-radius:8px; padding:8px 12px; margin-bottom:8px; font-size:.85rem; }
+        .harvest-empty { color:#8b949e; }
+        .harvest-list { list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:8px; }
+        .harvest-item { display:flex; align-items:center; gap:12px; background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:10px 14px; cursor:pointer; transition:border-color .12s, background .12s; }
+        .harvest-item:hover { border-color:rgba(88,166,255,.5); background:#161b22; }
+        .harvest-item.is-saved { opacity:.5; cursor:default; }
+        .harvest-check { display:flex; color:#6e7681; flex:0 0 auto; }
+        .harvest-main { flex:1; min-width:0; }
+        .harvest-name { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .harvest-tag { font-size:.68rem; text-transform:uppercase; letter-spacing:.03em; border:1px solid; border-radius:20px; padding:1px 8px; font-weight:600; }
+        .harvest-tag.saved { color:#3fb950; border-color:rgba(63,185,80,.4); }
+        .harvest-desc { color:#8b949e; font-size:.83rem; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:660px; }
+        .harvest-meta { display:flex; align-items:center; gap:12px; color:#8b949e; font-size:.82rem; white-space:nowrap; flex:0 0 auto; }
+        .harvest-meta span { display:flex; align-items:center; gap:4px; }
+        .harvest-meta a { color:#8b949e; display:flex; }
+        .harvest-meta a:hover { color:#58a6ff; }
+        .harvest-actions { display:flex; gap:10px; position:sticky; bottom:0; padding:12px 0 4px; background:linear-gradient(transparent, #0b0e14 45%); }
+      `}</style>
+      <div className="harvest-intro">
+        <h2><Globe size={18} /> Oogst</h2>
+        <p>
+          Plak een <strong>GitHub-account</strong> (bv. <code>hexsecteam</code>), <strong>tool-namen</strong> (één per lijn of met komma's, bv. <code>NHLauncher</code>), of een <strong>pagina-URL</strong> (blog, Medium, linktree — hij <strong>haalt de pagina op</strong> en trekt alle github-links eruit). Alle repos komen hier <strong>tijdelijk</strong> te staan — vink aan wat je wilt en ze gaan naar de notebook. Er wordt niks bewaard tot jij kiest.
+        </p>
+      </div>
+      <form className="harvest-form" onSubmit={run}>
+        <textarea
+          onChange={(e) => setSource(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(e); }}
+          placeholder={"hexsecteam\nof: NHLauncher, seeker, xeno-rat\nof: https://medium.com/@hexsectools/...  (pagina wordt opgehaald)"}
+          rows={3}
+          value={source}
+        />
+        <button className="primary" disabled={loading || !source.trim()} type="submit">
+          {loading ? <Loader2 className="spin" size={16} /> : <Globe size={16} />}
+          {loading ? "Oogsten…" : "Ophalen"}
+        </button>
+      </form>
+      {error && <div className="toast" style={{ position: "static", margin: "0 0 12px" }}>{error}</div>}
+      {result && (
+        <>
+          <div className="harvest-bar">
+            <span className="harvest-mode">{HARVEST_MODE_LABEL[result.mode] || result.mode}</span>
+            <span>{candidates.length} gevonden · {picked.size} gekozen</span>
+            <span style={{ flex: 1 }} />
+            <button className="ghost" onClick={() => setPicked(new Set(freshIds))} type="button">Alles</button>
+            <button className="ghost" onClick={() => setPicked(new Set())} type="button">Geen</button>
+          </div>
+          {(result.notes || []).map((note, i) => (<div className="harvest-note" key={i}>{note}</div>))}
+          {!candidates.length && <p className="harvest-empty">Niks gevonden. Probeer een andere bron of een pagina-URL.</p>}
+          <ul className="harvest-list">
+            {candidates.map((c) => {
+              const already = have.has(c.id);
+              const on = picked.has(c.id);
+              const tag = HARVEST_TAGS[c.tag] || {};
+              return (
+                <li className={`harvest-item${already ? " is-saved" : ""}`} key={c.id} onClick={() => !already && toggle(c.id)}>
+                  <span className="harvest-check">
+                    {already ? <CheckCircle2 color="#3fb950" size={18} /> : on ? <CheckCircle2 color="#58a6ff" size={18} /> : <Square size={18} />}
+                  </span>
+                  <div className="harvest-main">
+                    <div className="harvest-name">
+                      <strong>{c.fullName}</strong>
+                      {c.tag && <span className="harvest-tag" style={{ color: tag.color, borderColor: tag.color }}>{tag.label || c.tag}</span>}
+                      {already && <span className="harvest-tag saved">al opgeslagen</span>}
+                    </div>
+                    {c.description && <div className="harvest-desc">{c.description}</div>}
+                  </div>
+                  <span className="harvest-meta">
+                    {c.language && <span>{c.language}</span>}
+                    <span><Star size={13} /> {c.stars}</span>
+                    <a href={c.url} onClick={(e) => e.stopPropagation()} rel="noreferrer" target="_blank" title="Op GitHub openen"><ExternalLink size={14} /></a>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="harvest-actions">
+            <button className="primary" disabled={!picked.size || saving} onClick={save} type="button">
+              {saving ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
+              Bewaar geselecteerde ({picked.size})
+            </button>
+            <button className="ghost" onClick={() => { setResult(null); setSource(""); setPicked(new Set()); }} type="button">
+              <X size={16} /> Wis
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -801,6 +1037,37 @@ function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, on
 // Embedded shell rooted in the clone folder: one persistent session per repo
 // on the server, polled here. Lets you run the odd command without leaving
 // the app (git status, npm scripts, a quick ls) — same trust as start/install.
+const DOCK_STORAGE_KEY = "rn.terminalDock";
+const DOCK_MARGIN = 8;
+const DOCK_MIN_WIDTH = 360;
+
+function readDockPrefs() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(DOCK_STORAGE_KEY) || "{}");
+    return { minimized: Boolean(prefs.minimized), pos: prefs.pos && Number.isFinite(prefs.pos.x) ? prefs.pos : null };
+  } catch {
+    return { minimized: false, pos: null };
+  }
+}
+
+function writeDockPrefs(prefs) {
+  try {
+    localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // Storage blocked — the dock still works, it just forgets its place.
+  }
+}
+
+// Keeps at least the title bar on screen so a dragged dock can always be grabbed back.
+function clampDockPos(pos, height = 48) {
+  const width = Math.min(pos.w, window.innerWidth - DOCK_MARGIN * 2);
+  return {
+    w: Math.max(DOCK_MIN_WIDTH, width),
+    x: Math.min(Math.max(DOCK_MARGIN, pos.x), Math.max(DOCK_MARGIN, window.innerWidth - width - DOCK_MARGIN)),
+    y: Math.min(Math.max(DOCK_MARGIN, pos.y), Math.max(DOCK_MARGIN, window.innerHeight - height - DOCK_MARGIN))
+  };
+}
+
 function TerminalDock({ onClose, repo }) {
   const [terminal, setTerminal] = useState(null);
   const [command, setCommand] = useState("");
@@ -808,8 +1075,85 @@ function TerminalDock({ onClose, repo }) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [minimized, setMinimized] = useState(() => readDockPrefs().minimized);
+  const [pos, setPos] = useState(() => readDockPrefs().pos);
+  const dockRef = useRef(null);
   const outputRef = useRef(null);
   const inputRef = useRef(null);
+  const dragRef = useRef(null);
+
+  useEffect(() => writeDockPrefs({ minimized, pos }), [minimized, pos]);
+
+  useEffect(() => {
+    const onResize = () => setPos((current) => (current ? clampDockPos(current, dockRef.current?.offsetHeight) : current));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(""), 1400);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // Drag by the title bar; buttons inside it keep working as buttons.
+  const onDragStart = (event) => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    const rect = dockRef.current.getBoundingClientRect();
+    dragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top, w: rect.width };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const onDragMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    setPos(clampDockPos({ x: event.clientX - drag.dx, y: event.clientY - drag.dy, w: drag.w }, dockRef.current?.offsetHeight));
+  };
+
+  const onDragEnd = () => {
+    dragRef.current = null;
+  };
+
+  const resetPosition = (event) => {
+    if (event.target.closest("button")) return;
+    setPos(null);
+  };
+
+  const insertAtCaret = (text) => {
+    const field = inputRef.current;
+    const start = field?.selectionStart ?? command.length;
+    const end = field?.selectionEnd ?? command.length;
+    const next = command.slice(0, start) + text + command.slice(end);
+    setCommand(next);
+    requestAnimationFrame(() => {
+      if (!field) return;
+      field.focus();
+      field.selectionStart = field.selectionEnd = start + text.length;
+    });
+  };
+
+  // Classic console behaviour: right-click with a selection copies it, without one it pastes.
+  const onContextMenu = async (event) => {
+    event.preventDefault();
+    const selected = window.getSelection()?.toString() || "";
+    try {
+      if (selected && event.target.closest(".terminal-output")) {
+        await navigator.clipboard.writeText(selected);
+        window.getSelection().removeAllRanges();
+        setNotice("Gekopieerd");
+        return;
+      }
+      if (!terminal?.running) return;
+      const text = (await navigator.clipboard.readText()).replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+      if (!text) return;
+      insertAtCaret(text);
+      setNotice(text.includes("\n") ? "Geplakt — Enter om uit te voeren" : "Geplakt");
+    } catch {
+      setError("Klembord niet bereikbaar — gebruik Ctrl+V.");
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -860,12 +1204,16 @@ function TerminalDock({ onClose, repo }) {
   };
 
   const onKeyDown = (event) => {
-    if (event.key === "ArrowUp" && history.length) {
+    const multiline = command.includes("\n");
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit(event);
+    } else if (event.key === "ArrowUp" && history.length && !multiline) {
       event.preventDefault();
       const next = Math.min(historyIndex + 1, history.length - 1);
       setHistoryIndex(next);
       setCommand(history[next]);
-    } else if (event.key === "ArrowDown") {
+    } else if (event.key === "ArrowDown" && !multiline) {
       event.preventDefault();
       const next = historyIndex - 1;
       setHistoryIndex(next);
@@ -873,39 +1221,80 @@ function TerminalDock({ onClose, repo }) {
     }
   };
 
+  const restore = () => {
+    setMinimized(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const dockStyle = pos ? { left: pos.x, top: pos.y, width: minimized ? undefined : pos.w, right: "auto", bottom: "auto" } : undefined;
+  const inputRows = Math.min(6, command.split("\n").length);
+
   return (
-    <aside aria-label={`Terminal voor ${repo.fullName}`} className="terminal-dock">
-      <div className="terminal-head">
+    <aside
+      aria-label={`Terminal voor ${repo.fullName}`}
+      className={`terminal-dock${minimized ? " minimized" : ""}${pos ? " floating" : ""}`}
+      ref={dockRef}
+      style={dockStyle}
+    >
+      <div
+        className="terminal-head"
+        onDoubleClick={resetPosition}
+        onPointerCancel={onDragEnd}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        title="Sleep om te verplaatsen · dubbelklik = terug op vaste plek"
+      >
         <span>
-          <Terminal size={16} /> Terminal <small>{repo.fullName}{terminal?.shell ? ` · ${terminal.shell}` : ""}</small>
+          <GripHorizontal className="terminal-grip" size={15} />
+          <Terminal size={16} /> Terminal
+          {terminal?.running && <i className="terminal-live" title="Terminal draait" />}
+          <small>{repo.fullName}{!minimized && terminal?.shell ? ` · ${terminal.shell}` : ""}</small>
         </span>
         <div>
-          {terminal?.running ? (
-            <button disabled={busy === "stop"} onClick={() => act("stop", () => stopTerminal(repo))}><Square size={14} /> Stop</button>
-          ) : (
-            <button disabled={busy === "start"} onClick={() => act("start", () => startTerminal(repo))}><Play size={14} /> Open terminal</button>
+          {!minimized && (
+            <>
+              {terminal?.running ? (
+                <button disabled={busy === "stop"} onClick={() => act("stop", () => stopTerminal(repo))}><Square size={14} /> Stop</button>
+              ) : (
+                <button disabled={busy === "start"} onClick={() => act("start", () => startTerminal(repo))}><Play size={14} /> Open terminal</button>
+              )}
+              <button disabled={!terminal?.output || busy === "clear"} onClick={() => act("clear", () => clearTerminal(repo))}>Wis</button>
+            </>
           )}
-          <button disabled={!terminal?.output || busy === "clear"} onClick={() => act("clear", () => clearTerminal(repo))}>Wis</button>
-          <button aria-label="Terminal sluiten" className="icon" onClick={onClose}><X size={15} /></button>
+          {minimized ? (
+            <button aria-label="Terminal openklappen" className="icon" onClick={restore} title="Openklappen"><Maximize2 size={14} /></button>
+          ) : (
+            <button aria-label="Terminal minimaliseren" className="icon" onClick={() => setMinimized(true)} title="Minimaliseren"><Minus size={15} /></button>
+          )}
+          <button aria-label="Terminal sluiten" className="icon" onClick={onClose} title="Sluiten"><X size={15} /></button>
         </div>
       </div>
-      <pre className="terminal-output" ref={outputRef}>{terminal?.output || (terminal ? "Terminal gestopt." : "Terminal starten…")}</pre>
-      <form className="terminal-input" onSubmit={submit}>
-        <span>$</span>
-        <input
-          autoComplete="off"
-          disabled={!terminal?.running || busy === "input"}
-          onChange={(event) => setCommand(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={terminal?.running ? "Typ een commando en druk Enter (↑ voor geschiedenis)" : "Terminal is gestopt"}
-          ref={inputRef}
-          spellCheck="false"
-          value={command}
-        />
-        <button disabled={!terminal?.running || !command.trim() || busy === "input"}>Uitvoeren</button>
-      </form>
-      {error && <div className="runtime-error">{error}</div>}
-      <small className="terminal-warning">Commando’s draaien lokaal in de clone-map, met jouw rechten. Voer alleen uit wat je vertrouwt.</small>
+      {!minimized && (
+        <>
+          <pre className="terminal-output" onContextMenu={onContextMenu} ref={outputRef}>{terminal?.output || (terminal ? "Terminal gestopt." : "Terminal starten…")}</pre>
+          <form className="terminal-input" onContextMenu={onContextMenu} onSubmit={submit}>
+            <span>$</span>
+            <textarea
+              autoComplete="off"
+              disabled={!terminal?.running || busy === "input"}
+              onChange={(event) => setCommand(event.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={terminal?.running ? "Typ of plak (rechtermuis) een commando · Enter = uitvoeren · Shift+Enter = nieuwe regel" : "Terminal is gestopt"}
+              ref={inputRef}
+              rows={inputRows}
+              spellCheck="false"
+              value={command}
+            />
+            <button disabled={!terminal?.running || !command.trim() || busy === "input"}>Uitvoeren</button>
+          </form>
+          {error && <div className="runtime-error">{error}</div>}
+          <small className="terminal-warning">
+            {notice ? <b className="terminal-notice">{notice}</b> : "Rechtermuis = plakken (of kopiëren als je tekst selecteerde). "}
+            Commando’s draaien lokaal in de clone-map, met jouw rechten. Voer alleen uit wat je vertrouwt.
+          </small>
+        </>
+      )}
     </aside>
   );
 }
@@ -1147,6 +1536,19 @@ function RuntimePanel({ onRepoUpdate, repo }) {
     }
   };
 
+  const runDiagnose = async () => {
+    setBusy("diagnose");
+    setError("");
+    try {
+      const data = await diagnoseRepo(repo);
+      if (data.repo) onRepoUpdate(data.repo);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const install = runtime?.commands?.install;
   const start = runtime?.commands?.start;
 
@@ -1197,6 +1599,9 @@ function RuntimePanel({ onRepoUpdate, repo }) {
           <button className="danger" disabled={busy === "delete-clone"} onClick={removeClone} title="Verwijder gekloonde bestanden">
             {busy === "delete-clone" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />} Clone weg
           </button>
+          <button disabled={busy === "diagnose"} onClick={runDiagnose} title="Laat AI (lokale Ollama) de foutlog analyseren">
+            {busy === "diagnose" ? <Loader2 className="spin" size={15} /> : <Stethoscope size={15} />} AI-diagnose
+          </button>
         </div>
         <div className="runtime-meta">
           {install && <code>{install.label}</code>}
@@ -1206,6 +1611,23 @@ function RuntimePanel({ onRepoUpdate, repo }) {
           {repo.installedAt && <span>Installed {shortDate(repo.installedAt)}</span>}
         </div>
         {error && <div className="runtime-error">{error}</div>}
+        {repo.lastError && !runtime?.running && (
+          <div className="runtime-error">
+            Laatste fout ({repo.lastError.op}, {shortDate(repo.lastError.at)}): {repo.lastError.message}
+          </div>
+        )}
+        {repo.lastDiagnosis && (
+          <div className="diagnose-block">
+            <div className="diagnose-head">
+              <Stethoscope size={14} /> AI-diagnose
+              <span>
+                {repo.lastDiagnosis.provider}
+                {repo.lastDiagnosis.model ? ` · ${repo.lastDiagnosis.model}` : ""} · {shortDate(repo.lastDiagnosis.at)}
+              </span>
+            </div>
+            <pre className="diagnose-advice">{repo.lastDiagnosis.advice}</pre>
+          </div>
+        )}
         <ContainerControls onRepoUpdate={onRepoUpdate} repo={repo} />
         <EnvEditor repo={repo} />
         {runtime?.log && <pre className="runtime-log">{runtime.log}</pre>}

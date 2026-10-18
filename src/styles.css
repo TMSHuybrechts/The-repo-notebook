@@ -1572,7 +1572,7 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.graph-legend > button {
+.graph-cluster-row button {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
@@ -1585,23 +1585,23 @@ button:disabled {
   text-align: left;
 }
 
-.graph-legend > button:hover {
+.graph-cluster-row button:hover {
   background: rgba(47, 129, 247, 0.1);
 }
 
-.graph-legend > button.active {
+.graph-cluster-row button.active {
   background: #182536;
   border-color: #3b4a5f;
 }
 
-.graph-legend > button i {
+.graph-cluster-row button i {
   border-radius: 50%;
   flex: none;
   height: 10px;
   width: 10px;
 }
 
-.graph-legend > button span {
+.graph-cluster-row button span {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1609,7 +1609,7 @@ button:disabled {
   white-space: nowrap;
 }
 
-.graph-legend > button small {
+.graph-cluster-row button small {
   color: var(--muted);
 }
 
@@ -1813,6 +1813,16 @@ button:disabled {
   border: 1px solid rgba(242, 204, 96, 0.55);
   border-radius: 20px;
   color: var(--yellow);
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 8px;
+}
+
+.suggest-badge {
+  background: rgba(79, 209, 165, 0.14);
+  border: 1px dashed rgba(79, 209, 165, 0.65);
+  border-radius: 20px;
+  color: #4fd1a5;
   flex: none;
   font-size: 10.5px;
   padding: 1px 8px;
@@ -2079,6 +2089,112 @@ button:disabled {
   gap: 9px;
   margin-bottom: 14px;
   padding: 9px 13px;
+}
+
+.problems-block {
+  background: rgba(248, 81, 73, 0.06);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  padding: 10px 13px;
+}
+
+.problems-head {
+  align-items: center;
+  color: #ffa198;
+  display: flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.problem-item + .problem-item {
+  border-top: 1px solid rgba(248, 81, 73, 0.18);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.problem-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  gap: 9px;
+}
+
+.problem-name {
+  background: none;
+  border: none;
+  color: #58a6ff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+}
+
+.problem-name:hover {
+  text-decoration: underline;
+}
+
+.problem-msg {
+  color: #ffd1ce;
+  flex: 1;
+  min-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-diag {
+  align-items: center;
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  border-radius: 7px;
+  color: #9ecbff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 3px 10px;
+}
+
+.problem-advice,
+.diagnose-advice {
+  background: #060a11;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  color: #d8e1ec;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 11px;
+  white-space: pre-wrap;
+}
+
+.diagnose-block {
+  background: rgba(88, 166, 255, 0.05);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.diagnose-head {
+  align-items: center;
+  color: #9ecbff;
+  display: flex;
+  font-size: 12.5px;
+  font-weight: 600;
+  gap: 7px;
+}
+
+.diagnose-head span {
+  color: #8b949e;
+  font-weight: 400;
+  margin-left: auto;
 }
 
 .run-port {
@@ -2388,7 +2504,8 @@ button:disabled {
   font-weight: 900;
 }
 
-.terminal-input input {
+.terminal-input input,
+.terminal-input textarea {
   background: transparent;
   border: 0;
   color: #e8eef7;
@@ -2466,4 +2583,93 @@ button:disabled {
   font-size: 13px;
   line-height: 1.5;
   padding: 12px;
+}
+
+/* Graph controls remain inside the compact, scrollable legend. */
+.graph-cluster-row { display: flex; align-items: center; gap: 5px; }
+.graph-cluster-row > input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: #2f81f7; }
+.graph-cluster-row button { flex: 1; min-width: 0; }
+.graph-cluster-row button:disabled { opacity: 0.4; }
+.graph-count { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+.graph-settings { border-top: 1px solid var(--line-soft); margin-top: 8px; padding-top: 10px; }
+.graph-settings summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.graph-settings label { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; font-size: 12px; margin-top: 12px; }
+.graph-settings input[type="range"], .graph-settings select { width: 100%; min-width: 0; }
+.graph-settings input[type="range"] { accent-color: #2f81f7; padding: 0; }
+.graph-settings output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.graph-settings select, .graph-settings button, .graph-legend > button { background: #111d2b; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font-size: 12px; }
+.graph-settings button { margin-top: 8px; }
+.graph-settings .graph-color { flex-wrap: nowrap; }
+.graph-settings input[type="color"] { flex: none; width: 34px; height: 25px; padding: 1px; border: 1px solid var(--line); background: transparent; }
+.graph-settings :focus-visible, .graph-cluster-row :focus-visible { outline: 2px solid #79c0ff; outline-offset: 2px; }
+
+/* --- Terminal dock: minimize, drag, right-click paste --- */
+.terminal-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.terminal-head:active {
+  cursor: grabbing;
+}
+
+.terminal-head button {
+  cursor: pointer;
+}
+
+.terminal-grip {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.terminal-live {
+  background: #4fd1a5;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(79, 209, 165, 0.8);
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.terminal-dock.floating {
+  max-width: calc(100vw - 16px);
+}
+
+.terminal-dock.minimized {
+  gap: 0;
+  left: auto;
+  max-width: calc(100vw - 16px);
+  padding: 7px 9px;
+  width: auto;
+}
+
+.terminal-dock.minimized .terminal-head {
+  gap: 14px;
+}
+
+.terminal-dock.minimized .terminal-head small {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-input {
+  align-items: end;
+}
+
+.terminal-input textarea {
+  line-height: 1.45;
+  max-height: 9em;
+  resize: none;
+}
+
+.terminal-input > span {
+  padding-bottom: 7px;
+}
+
+.terminal-notice {
+  color: #4fd1a5;
+  margin-right: 6px;
 }

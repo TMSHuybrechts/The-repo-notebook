@@ -1,11 +1,12 @@
 import express from "express";
 import fs from "node:fs/promises";
-import { createReadStream, readFileSync, unlinkSync } from "node:fs";
+import { createReadStream, readFileSync, unlinkSync, existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildGraph } from "./graph.js";
+import { buildSuggestions, tasteQueries } from "./suggest.js";
 import { createRepoNotebookMcpServer, MCP_VERSION } from "../mcp/server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -103,11 +104,53 @@ const apiHeaders = () => ({
 });
 
 const safeName = (value) => value.replace(/[^A-Za-z0-9._-]/g, "-");
-const commandSpec = (cmd, args) => {
-  if (cmd === "npm" && process.env.npm_execpath) {
-    return { cmd: process.execPath, args: [process.env.npm_execpath, ...args] };
+// npm is op Windows een .cmd-shim zonder .exe: spawn met shell:false vindt
+// "npm" dan niet (ENOENT). npm_execpath bestaat alleen als de app zelf via
+// `npm run` gestart is; de verpakte exe moet npm-cli.js dus zelf op PATH
+// zoeken en direct onder node draaien.
+let npmCliCache;
+const resolveNpmCli = () => {
+  if (npmCliCache !== undefined) return npmCliCache;
+  npmCliCache = null;
+  const dirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  const nodeDir = dirs.find((dir) => existsSync(path.join(dir, "node.exe")));
+  for (const dir of nodeDir ? [nodeDir, ...dirs] : dirs) {
+    const cli = path.join(dir, "node_modules", "npm", "bin", "npm-cli.js");
+    if (existsSync(cli)) {
+      npmCliCache = { node: nodeDir ? path.join(nodeDir, "node.exe") : process.execPath, cli };
+      break;
+    }
   }
-  return { cmd, args };
+  return npmCliCache;
+};
+
+const commandSpec = (cmd, args) => {
+  // De Electron-schil draait de server met NODE_ENV=production,
+  // ELECTRON_RUN_AS_NODE=1 en PORT=<serverpoort>. Repo-kinderen mogen die
+  // niet erven: npm slaat met NODE_ENV=production alle devDependencies over
+  // (vite ontbreekt dan), dev-servers starten "in productie" en een geërfde
+  // PORT laat een repo op de poort van Repo Notebook zelf proberen draaien.
+  const env = { ...process.env };
+  delete env.NODE_ENV;
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.PORT;
+  delete env.HOST;
+  if (cmd === "npm") {
+    if (process.env.npm_execpath) {
+      // process.execPath kan Electron zijn; enkel dat kind heeft de vlag
+      // nodig om als kale node te draaien.
+      env.ELECTRON_RUN_AS_NODE = "1";
+      return { cmd: process.execPath, args: [process.env.npm_execpath, ...args], env };
+    }
+    if (process.platform === "win32") {
+      const npm = resolveNpmCli();
+      if (npm) {
+        if (npm.node === process.execPath) env.ELECTRON_RUN_AS_NODE = "1";
+        return { cmd: npm.node, args: [npm.cli, ...args], env };
+      }
+    }
+  }
+  return { cmd, args, env };
 };
 
 const assertRepo = (owner, repo) => {
@@ -211,12 +254,13 @@ const normalizeTrending = (repo) => ({
   topics: Array.isArray(repo.topics) ? repo.topics : [],
   stars: repo.stargazers_count || 0,
   forks: repo.forks_count || 0,
+  archived: repo.archived === true,
   updatedAt: repo.updated_at,
   createdAt: repo.created_at
 });
 
-const searchRepos = async (query) => {
-  const data = await gh(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=10`);
+const searchRepos = async (query, perPage = 10) => {
+  const data = await gh(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${perPage}`);
   return Array.isArray(data.items) ? data.items : [];
 };
 
@@ -475,13 +519,22 @@ const appendLog = async (repo, text) => {
   await fs.appendFile(logPath(repo), text);
 };
 
+// Fouten-logboek: een mislukte install/start/run blijft op het record staan
+// tot een volgende poging slaagt, zodat de UI en /api/problems ze kunnen
+// tonen zonder in losse logbestanden te spitten.
+const noteFailure = async (repo, op, message) => {
+  try {
+    await patchRepo(repo, { lastError: { at: new Date().toISOString(), op, message: String(message || "").slice(0, 600) } });
+  } catch {}
+};
+
 const runCommand = async (repo, target, command, timeoutMs = 900000) => {
   await appendLog(repo, `\n\n$ ${command.label}\n`);
   return new Promise((resolve, reject) => {
     const spec = commandSpec(command.cmd, command.args);
     let child;
     try {
-      child = spawn(spec.cmd, spec.args, { cwd: target, shell: false });
+      child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env });
     } catch (error) {
       reject(error);
       return;
@@ -519,7 +572,7 @@ const startCommand = async (repo, target, command, opts = {}) => {
   const spec = commandSpec(command.cmd, command.args);
   let child;
   try {
-    child = spawn(spec.cmd, spec.args, { cwd: target, shell: false });
+    child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env });
   } catch (error) {
     await appendLog(repo, `\n[start error] ${error.message}\n`);
     throw error;
@@ -554,10 +607,17 @@ const startCommand = async (repo, target, command, opts = {}) => {
     detectUrl(text);
     appendLog(repo, text);
   });
-  child.on("error", (error) => appendLog(repo, `\n[start error] ${error.message}\n`));
+  child.on("error", (error) => {
+    entry.failed = true;
+    appendLog(repo, `\n[start error] ${error.message}\n`);
+    noteFailure(repo, "start", error.message);
+  });
   child.on("close", async (code) => {
     running.delete(repo.id);
     await appendLog(repo, `\n[process exited with ${code}]\n`);
+    if (code !== 0 && code !== null && !entry.stopping && !entry.failed) {
+      await noteFailure(repo, "run", `${command.label} stopte met code ${code}.`);
+    }
   });
 
   return { pid: child.pid, startedAt };
@@ -687,6 +747,49 @@ app.get("/api/graph", async (_req, res) => {
 app.get("/api/trending", async (_req, res) => {
   try {
     res.json(await trendingRepos());
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Personal suggestions for the map: GitHub-search candidates scored
+// against the shelf (status-weighted taste) by the same explainable engine as
+// the graph. Cached: unauthenticated GitHub search allows 10 requests/minute
+// and one refresh burns ~5. ---
+let suggestionsCache = { key: null, fetchedAt: "", data: null };
+const SUGGESTIONS_TTL_MS = 30 * 60 * 1000;
+
+app.get("/api/suggestions", async (req, res) => {
+  try {
+    const store = await readStore();
+    if (store.repos.length < 3) {
+      return res.json({
+        generatedAt: new Date().toISOString(),
+        suggestions: [],
+        note: "Bewaar eerst een paar repos — dan kent de kaart je smaak."
+      });
+    }
+    const key = store.repos.map((repo) => `${repo.id}|${repo.status || ""}|${repo.category || ""}`).join(";");
+    const cacheFresh =
+      suggestionsCache.data &&
+      suggestionsCache.key === key &&
+      Date.now() - Date.parse(suggestionsCache.fetchedAt) < SUGGESTIONS_TTL_MS;
+    if (cacheFresh && req.query.refresh === undefined) return res.json(suggestionsCache.data);
+
+    const queries = tasteQueries(store.repos);
+    const results = await Promise.all(queries.map((query) => searchRepos(query, 20).catch(() => [])));
+    const candidates = results.flat().map(normalizeTrending);
+
+    // Cluster of each shelf repo from the same cached graph as the map, so a
+    // suggestion node lands next to the cluster of its strongest link.
+    const graphKey = store.repos.map((r) => `${r.id}|${r.fetchedAt}|${r.category || ""}`).join(";");
+    if (graphCache.key !== graphKey) graphCache = { key: graphKey, graph: buildGraph(store.repos) };
+    const clusterOf = new Map(graphCache.graph.nodes.map((node) => [node.id, node.cluster]));
+
+    const suggestions = buildSuggestions(store.repos, candidates, { clusterOf });
+    const data = { generatedAt: new Date().toISOString(), queries, suggestions };
+    suggestionsCache = { key, fetchedAt: data.generatedAt, data };
+    res.json(data);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -1136,9 +1239,10 @@ app.post("/api/notebook/:owner/:repo/terminal/stop", async (req, res) => {
 });
 
 app.post("/api/notebook/:owner/:repo/install", async (req, res) => {
+  let repo;
   try {
     const store = await readStore();
-    const repo = findRepo(store, req.params.owner, req.params.repo);
+    repo = findRepo(store, req.params.owner, req.params.repo);
     if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
     const target = cloneTarget(repo);
     if (!(await fileExists(target))) return res.status(404).json({ error: "Repository is not cloned yet." });
@@ -1148,17 +1252,19 @@ app.post("/api/notebook/:owner/:repo/install", async (req, res) => {
     for (const step of commands.install.steps || [commands.install]) {
       await runCommand(repo, target, step);
     }
-    const updated = await patchRepo(repo, { installStatus: "installed", installedAt: new Date().toISOString() });
+    const updated = await patchRepo(repo, { installStatus: "installed", installedAt: new Date().toISOString(), lastError: null });
     res.json({ status: "installed", repo: updated, runtime: await runtimeFor(updated) });
   } catch (error) {
+    if (repo) await noteFailure(repo, "install", error.message);
     res.status(400).json({ error: error.message });
   }
 });
 
 app.post("/api/notebook/:owner/:repo/start", async (req, res) => {
+  let repo;
   try {
     const store = await readStore();
-    const repo = findRepo(store, req.params.owner, req.params.repo);
+    repo = findRepo(store, req.params.owner, req.params.repo);
     if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
     if (running.has(repo.id)) return res.json({ status: "running", runtime: await runtimeFor(repo) });
 
@@ -1180,9 +1286,10 @@ app.post("/api/notebook/:owner/:repo/start", async (req, res) => {
     }
 
     const started = await startCommand(repo, target, commands.start);
-    const updated = await patchRepo(repo, { lastStartCommand: commands.start.label, lastStartedAt: started.startedAt });
+    const updated = await patchRepo(repo, { lastStartCommand: commands.start.label, lastStartedAt: started.startedAt, lastError: null, lastDiagnosis: null });
     res.json({ status: "started", pid: started.pid, portWarning, repo: updated, runtime: await runtimeFor(updated) });
   } catch (error) {
+    if (repo) await noteFailure(repo, "start", error.message);
     res.status(400).json({ error: error.message });
   }
 });
@@ -1195,6 +1302,9 @@ app.post("/api/notebook/:owner/:repo/stop", async (req, res) => {
     const run = running.get(repo.id);
     if (!run) return res.json({ status: "stopped", runtime: await runtimeFor(repo) });
 
+    // Handmatige stop is geen fout: markeer vóór de kill zodat de
+    // close-handler er geen lastError van maakt (taskkill geeft exit 1).
+    run.stopping = true;
     // Container: de docker-client killen stopt de container niet — netjes
     // docker stop sturen (de --rm ruimt hem daarna zelf op).
     if (run.mode === "container" && run.containerName) {
@@ -1301,9 +1411,88 @@ const callAi = async (prompt) => {
   return { available: true, provider: "openai", model: process.env.RN_AI_MODEL || "gpt-4o-mini", text: (data.choices?.[0]?.message?.content || "").trim() };
 };
 
+// --- Fouten-logboek: alle repos met een blijvende lastError, nieuwste eerst ---
+app.get("/api/problems", async (_req, res) => {
+  try {
+    const store = await readStore();
+    const problems = store.repos
+      .filter((repo) => repo.lastError)
+      .map((repo) => ({
+        id: repo.id,
+        owner: repo.owner,
+        name: repo.name,
+        fullName: repo.fullName,
+        error: repo.lastError,
+        diagnosis: repo.lastDiagnosis || null
+      }))
+      .sort((a, b) => String(b.error.at || "").localeCompare(String(a.error.at || "")));
+    res.json({ problems });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- AI-probleemoplosser: stuurt de runlog + context naar de AI (standaard
+// lokale Ollama, gratis) en bewaart oorzaak + fix-stappen op het record.
+// Alleen op klik — nooit automatisch, dus geen RAM/tokens zonder vraag. ---
+app.post("/api/notebook/:owner/:repo/diagnose", async (req, res) => {
+  try {
+    const store = await readStore();
+    const repo = findRepo(store, req.params.owner, req.params.repo);
+    if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
+    const log = (await tailLog(repo)).slice(-4000);
+    if (!log.trim() && !repo.lastError) return res.status(400).json({ error: "Geen runlog of fout om te onderzoeken." });
+
+    let commands = null;
+    try {
+      const target = cloneTarget(repo);
+      if (await fileExists(target)) commands = await detectRuntime(target);
+    } catch {}
+
+    const prompt = [
+      "Je bent een nuchtere Windows-devops-hulp. Een lokale app (Repo Notebook) probeerde een GitHub-repo te installeren of starten en dat faalde.",
+      `Repo: ${repo.fullName} (${repo.language || "onbekende taal"})`,
+      commands
+        ? `Gedetecteerde commando's: install = ${commands.install?.label || "-"} | start = ${commands.start?.label || "-"}`
+        : "De repo is (nog) niet gekloond.",
+      repo.lastError ? `Laatst geregistreerde fout (${repo.lastError.op}, ${repo.lastError.at}): ${repo.lastError.message}` : "",
+      "Runlog (staart, oudste eerst):",
+      "```",
+      log || "(leeg)",
+      "```",
+      "Antwoord in het Nederlands, kort en concreet, zonder disclaimers:",
+      "1) Oorzaak — één zin.",
+      "2) Fix — genummerde stappen voor Windows.",
+      "3) Als het aan de repo zelf ligt (ontbrekende .env-sleutel, bezette poort, verkeerde Node/Python-versie): zeg precies wat."
+    ].filter(Boolean).join("\n");
+
+    const result = await callAi(prompt);
+    if (!result.available) return res.status(503).json({ error: "Geen AI beschikbaar — start Ollama of zet een API-key." });
+    const diagnosis = { at: new Date().toISOString(), provider: result.provider, model: result.model, advice: result.text };
+    const updated = await patchRepo(repo, { lastDiagnosis: diagnosis });
+    res.json({ diagnosis, repo: updated });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Liveness for the Electron shell: must answer instantly, so no external
+// probes here (the Ollama check in resolveAi can take seconds when nothing
+// listens on the Ollama port). ---
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 // --- Capabilities the UI needs to know about (which AI is usable, GH rate limit) ---
+// resolveAi probes Ollama with a 2.5s timeout; when Ollama is down every call
+// pays that wait, so cache the outcome briefly instead of re-probing per request.
+const AI_STATUS_TTL = 15000;
+let aiStatusCache = { at: 0, value: null };
 app.get("/api/config", async (_req, res) => {
-  const ai = await resolveAi();
+  if (!aiStatusCache.value || Date.now() - aiStatusCache.at > AI_STATUS_TTL) {
+    aiStatusCache = { at: Date.now(), value: await resolveAi() };
+  }
+  const ai = aiStatusCache.value;
   res.json({ ai: ai.available, aiProvider: ai.provider, token: Boolean(process.env.GITHUB_TOKEN) });
 });
 
@@ -1370,6 +1559,192 @@ app.post("/api/import-stars", async (req, res) => {
       }
     }
     res.json({ added, existed, total: collected.length, repos: (await readStore()).repos });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// --- Harvest (Oogst): preview repos from a GitHub account (their repos +
+// stars), from pasted text/URLs (extract github.com links), or by searching
+// tool names on GitHub. Returns candidates ONLY — nothing is saved until the
+// user picks and the frontend calls /api/notebook/bulk. Rate-safe: capped
+// counts, throttled search, and a clean stop when GitHub rate-limits us. ---
+const HARVEST_RESERVED = new Set([
+  "features", "about", "pricing", "marketplace", "sponsors", "settings", "topics",
+  "collections", "trending", "explore", "search", "login", "join", "notifications",
+  "orgs", "apps", "security", "readme", "site", "contact", "new", "organizations",
+  "dashboard", "stars", "watching", "pulls", "issues", "codespaces"
+]);
+
+// Block SSRF to internal hosts when the Oogst tab fetches an external page.
+const isPrivateHost = (host) => {
+  const h = (host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h || h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")) return true;
+  if (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+  if (/^(127|10|0)\./.test(h) || /^169\.254\./.test(h) || /^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+};
+
+app.post("/api/harvest", async (req, res) => {
+  try {
+    const source = String(req.body?.source || "").trim();
+    if (!source) return res.status(400).json({ error: "Geef een GitHub-account, tool-namen of een pagina-URL." });
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const isLimit = (err) => /\((403|429)\)/.test(err?.message || "") || /rate limit/i.test(err?.message || "");
+    const byId = new Map();
+    const notes = [];
+    let rateLimited = false;
+
+    const toCandidate = (r, tag) => {
+      const fullName = r.full_name || `${r.owner?.login || ""}/${r.name || ""}`;
+      const id = fullName.toLowerCase();
+      if (!r.name || !id.includes("/")) return null;
+      return {
+        id, tag,
+        owner: r.owner?.login || fullName.split("/")[0],
+        name: r.name,
+        fullName,
+        url: r.html_url || `https://github.com/${fullName}`,
+        stars: r.stargazers_count ?? 0,
+        language: r.language || "",
+        description: r.description || ""
+      };
+    };
+    const add = (r, tag) => { const c = toCandidate(r, tag); if (c && !byId.has(c.id)) byId.set(c.id, c); };
+
+    // Extract all github.com/owner/repo slugs from a blob of text (or fetched HTML).
+    const slugsIn = (text) => [...new Set(
+      [...String(text).matchAll(/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)/gi)]
+        .map((m) => `${m[1]}/${m[2].replace(/\.git$/i, "")}`)
+        .filter((slug) => !HARVEST_RESERVED.has(slug.split("/")[0].toLowerCase()))
+    )];
+
+    // An account handle: a profile URL (single path segment) or a bare handle.
+    let handle = null;
+    const profile = source.match(/github\.com\/([A-Za-z0-9-]{1,39})\/?(?:[?#][^\s]*)?$/i);
+    if (profile && !HARVEST_RESERVED.has(profile[1].toLowerCase())) handle = profile[1];
+    else if (/^@?[A-Za-z0-9-]{1,39}$/.test(source) && !HARVEST_RESERVED.has(source.replace(/^@/, "").toLowerCase())) {
+      handle = source.replace(/^@/, "");
+    }
+
+    // Enrich explicit owner/repo links (capped, throttled, limit-aware).
+    const enrichLinks = async (slugs) => {
+      for (const slug of slugs.slice(0, 30)) {
+        if (rateLimited) break;
+        const [o, n] = slug.split("/");
+        try {
+          add(await gh(`https://api.github.com/repos/${o}/${n}`), "link");
+        } catch (err) {
+          if (isLimit(err)) { rateLimited = true; break; }
+          add({ full_name: `${o}/${n}`, name: n, owner: { login: o } }, "link"); // still saveable
+        }
+        await sleep(120);
+      }
+      if (slugs.length > 30) notes.push(`${slugs.length - 30} extra links overgeslagen (plafond 30).`);
+    };
+    // Search tool names on GitHub (capped, throttled, limit-aware).
+    const searchNames = async (names, perName) => {
+      for (const name of names) {
+        if (rateLimited) break;
+        try {
+          // in:name → match the tool name in the repo name, not loosely in the
+          // readme (which lets giant unrelated repos hijack the top spots).
+          const data = await gh(`https://api.github.com/search/repositories?q=${encodeURIComponent(`${name} in:name`)}&sort=stars&order=desc&per_page=5`);
+          (data.items || []).slice(0, perName).forEach((r) => add(r, "zoek"));
+        } catch (err) {
+          if (isLimit(err)) { rateLimited = true; notes.push("GitHub-zoeklimiet geraakt — even wachten en opnieuw."); break; }
+        }
+        await sleep(1200); // throttle: stay well under the search rate limit
+      }
+    };
+    // Fetch one external page and return its HTML (SSRF-guarded, capped, timed).
+    const fetchPage = async (rawUrl) => {
+      let u;
+      try { u = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`); } catch { return ""; }
+      if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+      if (isPrivateHost(u.hostname)) { notes.push(`Interne URL geweigerd: ${u.hostname}`); return ""; }
+      try {
+        const resp = await fetch(u.href, {
+          redirect: "follow",
+          signal: AbortSignal.timeout(12000),
+          headers: { "User-Agent": "Mozilla/5.0 (RepoNotebook Oogst)", Accept: "text/html,application/xhtml+xml,*/*" }
+        });
+        if (!resp.ok) { notes.push(`Pagina ${u.hostname} gaf HTTP ${resp.status}.`); return ""; }
+        try { if (isPrivateHost(new URL(resp.url).hostname)) return ""; } catch { /* keep */ }
+        const ctype = resp.headers.get("content-type") || "";
+        if (!/html|xml|text|json/i.test(ctype)) { notes.push(`Pagina ${u.hostname} is geen tekst (${ctype.split(";")[0] || "?"}).`); return ""; }
+        let html = await resp.text();
+        if (html.length > 4000000) html = html.slice(0, 4000000);
+        return html;
+      } catch (err) {
+        notes.push(`Pagina ${u.hostname} niet opgehaald (${/timeout|abort/i.test(err?.message || "") ? "time-out" : "fout"}).`);
+        return "";
+      }
+    };
+
+    let mode;
+    if (handle) {
+      // The whole input is a GitHub account/handle → their repos + their stars.
+      mode = "account";
+      try {
+        for (let page = 1; page <= 3; page++) {
+          const items = await gh(`https://api.github.com/users/${handle}/repos?per_page=100&sort=updated&page=${page}`);
+          if (!Array.isArray(items) || !items.length) break;
+          items.forEach((r) => add(r, "eigen"));
+          if (items.length < 100) break;
+        }
+      } catch (err) { if (isLimit(err)) rateLimited = true; }
+      if (!rateLimited) {
+        try {
+          for (let page = 1; page <= 2; page++) {
+            const items = await gh(`https://api.github.com/users/${handle}/starred?per_page=100&page=${page}`);
+            if (!Array.isArray(items) || !items.length) break;
+            items.forEach((r) => add(r, "star"));
+            if (items.length < 100) break;
+          }
+        } catch (err) { if (isLimit(err)) rateLimited = true; }
+      }
+      // No account, or an account with nothing → treat the word as a tool name.
+      if (byId.size === 0 && !rateLimited) {
+        mode = "search";
+        await searchNames([handle], 3);
+        notes.push(`Geen repos onder "${handle}" — als tool-naam gezocht.`);
+      }
+    } else {
+      // Free text / caption / page URL(s): optionally fetch external pages, then
+      // harvest github links from source + fetched HTML, and search bare names.
+      const rawUrls = [...source.matchAll(/https?:\/\/[^\s"'<>)]+/gi)].map((m) => m[0]);
+      const bareDomains = source.split(/[\s,;]+/).map((t) => t.trim())
+        .filter((t) => !/^https?:/i.test(t) && /^([a-z0-9-]+\.)+[a-z]{2,}(\/[^\s]*)?$/i.test(t));
+      const pageUrls = [...new Set([...rawUrls, ...bareDomains])]
+        .filter((u) => !/github\.com/i.test(u) && !/githubusercontent\.com/i.test(u))
+        .slice(0, 3);
+      let scanText = source;
+      for (const pu of pageUrls) {
+        const html = await fetchPage(pu);
+        if (html) { scanText += "\n" + html; notes.push(`Pagina opgehaald: ${pu}`); }
+      }
+      const slugs = slugsIn(scanText);
+      await enrichLinks(slugs);
+      const covered = new Set([...byId.values()].map((c) => c.name.toLowerCase()));
+      const tokens = source.split(/[\n,;]+/).map((t) => t.trim())
+        .filter((t) => /^@?[A-Za-z0-9][A-Za-z0-9._+-]{1,39}$/.test(t))
+        .filter((t) => !/^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(t) && !/^https?:/i.test(t)) // not a URL/domain
+        .map((t) => t.replace(/^@/, "").toLowerCase())
+        .filter((t) => !HARVEST_RESERVED.has(t) && !covered.has(t));
+      const names = [...new Set(tokens)].slice(0, 10);
+      if (names.length) await searchNames(names, 2);
+      if (tokens.length > 10) notes.push("Meer dan 10 namen — enkel de eerste 10 gezocht.");
+      mode = pageUrls.length ? "page" : slugs.length && names.length ? "mixed" : slugs.length ? "links" : "search";
+    }
+
+    if (rateLimited && !notes.some((n) => /limiet/i.test(n))) {
+      notes.push("GitHub-limiet geraakt — een deel is opgehaald. Stel een token in (Toevoegen → token) of wacht even.");
+    }
+    const candidates = [...byId.values()].sort((a, b) => b.stars - a.stars);
+    res.json({ mode, candidates, notes, rateLimited });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

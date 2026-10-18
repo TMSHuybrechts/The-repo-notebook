@@ -21,6 +21,7 @@ Repo Notebook is a local desktop app (and plain Node app) for the GitHub reposit
 ![Repo Notebook — list and detail view](docs/img/list-view.png)
 
 - **Knowledge-graph map**: the app links your repos by shared topics, README/description similarity (TF-IDF), same author/category/language, and explains every link. Label propagation groups them into named clusters; links that only the text reveals are shown as *hidden links*. Click a node for the "why", double-click to open it in the list. A "Related repos" panel shows the same for the selected repo.
+- **Personal suggestions on the map**: a toggle adds GitHub repos you *don't* have yet as dashed ghost nodes, hanging off the clusters they match. Candidates come from GitHub search queries derived from your shelf's taste (statuses weigh in: *keep* counts hardest, *archive* barely) and are scored by the same explainable engine — every ghost shows which of your repos it matches and why, with a one-click **save**. No AI calls, no tokens: pure TF-IDF and topics.
 
 **Run it**
 - Clone into the app's own folder, then the app detects the stack — Node, Python, Rust, Go, Docker Compose, Make — and offers install / start / stop with live logs. It sniffs the dev-server URL from the output and offers **Open in browser**.

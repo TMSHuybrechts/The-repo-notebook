@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Activity, AlertTriangle, Container, Copy, FolderOpen, GitBranch, Globe, List, Loader2, Play, RefreshCcw, Square, Zap } from "lucide-react";
-import { checkUpdatesAll, loadRuntimes, openLocalRepo, pullRepo, startContainer, startRepo, stopRepo } from "./api";
+import { Activity, AlertTriangle, Container, Copy, FolderOpen, GitBranch, Globe, List, Loader2, Play, RefreshCcw, Square, Stethoscope, Zap } from "lucide-react";
+import { checkUpdatesAll, diagnoseRepo, loadProblems, loadRuntimes, openLocalRepo, pullRepo, startContainer, startRepo, stopRepo } from "./api";
 import { languageColor } from "./format";
 
 const uptime = (startedAt) => {
@@ -11,6 +11,8 @@ const uptime = (startedAt) => {
   return `${Math.floor(minutes / 60)}u ${minutes % 60}m`;
 };
 
+const firstLine = (text) => String(text || "").split("\n").find((line) => line.trim()) || "";
+
 // Snelstart: alle gekloonde repos op één tab — start/stop, waar draait het,
 // updates-check over alles tegelijk, en de link zodra een app z'n URL meldt.
 export function QuickstartView({ dups = {}, onOpenRepo }) {
@@ -20,10 +22,11 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [problems, setProblems] = useState([]);
 
   useEffect(() => {
     let active = true;
-    const load = () =>
+    const load = () => {
       loadRuntimes()
         .then((data) => {
           if (active) {
@@ -32,6 +35,10 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
           }
         })
         .catch((err) => active && setError(err.message));
+      loadProblems()
+        .then((data) => active && setProblems(data.problems || []))
+        .catch(() => {});
+    };
     load();
     const timer = setInterval(load, 3500);
     return () => {
@@ -39,6 +46,19 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
       clearInterval(timer);
     };
   }, []);
+
+  const diagnose = async (problem) => {
+    setBusy(`diag:${problem.id}`);
+    setError("");
+    try {
+      await diagnoseRepo(problem);
+      setProblems((await loadProblems()).problems || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
 
   const act = async (item, action) => {
     setBusy(`${action}:${item.id}`);
@@ -99,6 +119,33 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
       </div>
       {warning && (
         <div className="port-warning"><AlertTriangle size={15} /> {warning}</div>
+      )}
+      {problems.length > 0 && (
+        <div className="problems-block">
+          <div className="problems-head">
+            <AlertTriangle size={15} /> Problemen ({problems.length})
+          </div>
+          {problems.map((problem) => (
+            <div className="problem-item" key={problem.id}>
+              <div className="problem-row">
+                <button className="problem-name" onClick={() => onOpenRepo(problem.id)} title="Open in lijst" type="button">
+                  {problem.fullName}
+                </button>
+                <span className="problem-msg">[{problem.error.op}] {firstLine(problem.error.message)}</span>
+                <button
+                  className="problem-diag"
+                  disabled={busy === `diag:${problem.id}`}
+                  onClick={() => diagnose(problem)}
+                  title="Laat AI (lokale Ollama) de foutlog analyseren"
+                  type="button"
+                >
+                  {busy === `diag:${problem.id}` ? <Loader2 className="spin" size={13} /> : <Stethoscope size={13} />} AI-diagnose
+                </button>
+              </div>
+              {problem.diagnosis && <pre className="problem-advice">{problem.diagnosis.advice}</pre>}
+            </div>
+          ))}
+        </div>
       )}
       <div className="quickstart-grid">
         {items.map((item) => {

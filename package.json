@@ -10,7 +10,8 @@
     "preview": "node server/index.js --production",
     "app": "npm run build && electron .",
     "app:build": "npm run build && electron-builder",
-    "mcp": "node mcp/server.js"
+    "mcp": "node mcp/server.js",
+    "test": "node --test server/suggest.test.js"
   },
   "build": {
     "appId": "com.thomashuybrechts.reponotebook",

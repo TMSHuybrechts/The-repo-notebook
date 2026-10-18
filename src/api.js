@@ -10,6 +10,9 @@ export const loadGraph = () => fetch("/api/graph").then(json);
 
 export const loadTrending = () => fetch("/api/trending").then(json);
 
+export const loadSuggestions = (refresh = false) =>
+  fetch(`/api/suggestions${refresh ? "?refresh=1" : ""}`).then(json);
+
 export const saveRepo = (url) =>
   fetch("/api/notebook", {
     method: "POST",
@@ -62,6 +65,13 @@ export const stopRepo = (repo) =>
 export const loadLog = (repo) =>
   fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/log`).then(json);
 
+export const diagnoseRepo = (repo) =>
+  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/diagnose`, {
+    method: "POST"
+  }).then(json);
+
+export const loadProblems = () => fetch("/api/problems").then(json);
+
 export const setRepoMeta = (repo, meta) =>
   fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/meta`, {
     method: "POST",
@@ -96,6 +106,13 @@ export const bulkSave = (text) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text })
+  }).then(json);
+
+export const harvest = (source) =>
+  fetch("/api/harvest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source })
   }).then(json);
 
 export const importStars = (username) =>
