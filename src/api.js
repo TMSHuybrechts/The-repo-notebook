@@ -1,164 +1,171 @@
+import { getLocale, t } from "./i18n.js";
+
+const apiFetch = (url, options = {}) => fetch(url, {
+  ...options,
+  headers: { ...options.headers, "Accept-Language": getLocale() }
+});
+
 const json = async (res) => {
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Request failed.");
+  if (!res.ok) throw new Error(t(data.error || "Request failed."));
   return data;
 };
 
-export const loadNotebook = () => fetch("/api/notebook").then(json);
+export const loadNotebook = () => apiFetch("/api/notebook").then(json);
 
-export const loadGraph = () => fetch("/api/graph").then(json);
+export const loadGraph = () => apiFetch("/api/graph").then(json);
 
-export const loadTrending = () => fetch("/api/trending").then(json);
+export const loadTrending = () => apiFetch("/api/trending").then(json);
 
 export const saveRepo = (url) =>
-  fetch("/api/notebook", {
+  apiFetch("/api/notebook", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url })
   }).then(json);
 
 export const refreshRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/refresh`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/refresh`, {
     method: "POST"
   }).then(json);
 
 export const removeRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`, {
     method: "DELETE"
   }).then(json);
 
 export const cloneRepo = (repo, method) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/clone`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/clone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ method })
   }).then(json);
 
 export const openLocalRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/open-local`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/open-local`, {
     method: "POST"
   }).then(json);
 
 export const loadRuntime = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/runtime`).then(json);
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/runtime`).then(json);
 
-export const loadRuntimes = () => fetch("/api/runtimes").then(json);
+export const loadRuntimes = () => apiFetch("/api/runtimes").then(json);
 
 export const installRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/install`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/install`, {
     method: "POST"
   }).then(json);
 
 export const startRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/start`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/start`, {
     method: "POST"
   }).then(json);
 
 export const stopRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/stop`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/stop`, {
     method: "POST"
   }).then(json);
 
 export const loadLog = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/log`).then(json);
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/log`).then(json);
 
 export const setRepoMeta = (repo, meta) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/meta`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/meta`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(meta)
   }).then(json);
 
-export const loadConfig = () => fetch("/api/config").then(json);
+export const loadConfig = () => apiFetch("/api/config").then(json);
 
-export const loadMcpStatus = () => fetch("/api/mcp/status").then(json);
+export const loadMcpStatus = () => apiFetch("/api/mcp/status").then(json);
 
 const terminalUrl = (repo, suffix = "") =>
   `/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/terminal${suffix}`;
 
-export const loadTerminal = (repo) => fetch(terminalUrl(repo)).then(json);
+export const loadTerminal = (repo) => apiFetch(terminalUrl(repo)).then(json);
 
-export const startTerminal = (repo) => fetch(terminalUrl(repo, "/start"), { method: "POST" }).then(json);
+export const startTerminal = (repo) => apiFetch(terminalUrl(repo, "/start"), { method: "POST" }).then(json);
 
 export const sendTerminalInput = (repo, input) =>
-  fetch(terminalUrl(repo, "/input"), {
+  apiFetch(terminalUrl(repo, "/input"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ input })
   }).then(json);
 
-export const clearTerminal = (repo) => fetch(terminalUrl(repo, "/clear"), { method: "POST" }).then(json);
+export const clearTerminal = (repo) => apiFetch(terminalUrl(repo, "/clear"), { method: "POST" }).then(json);
 
-export const stopTerminal = (repo) => fetch(terminalUrl(repo, "/stop"), { method: "POST" }).then(json);
+export const stopTerminal = (repo) => apiFetch(terminalUrl(repo, "/stop"), { method: "POST" }).then(json);
 
 export const bulkSave = (text) =>
-  fetch("/api/notebook/bulk", {
+  apiFetch("/api/notebook/bulk", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text })
   }).then(json);
 
 export const importStars = (username) =>
-  fetch("/api/import-stars", {
+  apiFetch("/api/import-stars", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username })
   }).then(json);
 
 export const importNotebook = (repos) =>
-  fetch("/api/import", {
+  apiFetch("/api/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ repos })
   }).then(json);
 
 export const pullRepo = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/pull`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/pull`, {
     method: "POST"
   }).then(json);
 
 export const checkUpdates = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/updates`).then(json);
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/updates`).then(json);
 
 export const repoSize = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/size`).then(json);
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/size`).then(json);
 
 export const deleteClone = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/delete-clone`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/delete-clone`, {
     method: "POST"
   }).then(json);
 
 export const loadEnv = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/env`).then(json);
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/env`).then(json);
 
 export const saveEnv = (repo, content) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/env`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/env`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content })
   }).then(json);
 
-export const checkUpdatesAll = () => fetch("/api/updates-all").then(json);
+export const checkUpdatesAll = () => apiFetch("/api/updates-all").then(json);
 
-export const dockerStatus = () => fetch("/api/docker").then(json);
+export const dockerStatus = () => apiFetch("/api/docker").then(json);
 
-export const dockerStart = () => fetch("/api/docker/start", { method: "POST" }).then(json);
+export const dockerStart = () => apiFetch("/api/docker/start", { method: "POST" }).then(json);
 
-export const dockerStop = () => fetch("/api/docker/stop", { method: "POST" }).then(json);
+export const dockerStop = () => apiFetch("/api/docker/stop", { method: "POST" }).then(json);
 
 export const startContainer = (repo) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/start-container`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/start-container`, {
     method: "POST"
   }).then(json);
 
-export const loadDuplicates = () => fetch("/api/duplicates").then(json);
+export const loadDuplicates = () => apiFetch("/api/duplicates").then(json);
 
-export const startBulkVerdicts = () => fetch("/api/verdicts/bulk", { method: "POST" }).then(json);
+export const startBulkVerdicts = () => apiFetch("/api/verdicts/bulk", { method: "POST" }).then(json);
 
-export const bulkVerdictStatus = () => fetch("/api/verdicts/bulk").then(json);
+export const bulkVerdictStatus = () => apiFetch("/api/verdicts/bulk").then(json);
 
 export const repoVerdict = (repo, refresh = false) =>
-  fetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/verdict`, {
+  apiFetch(`/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/verdict`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh })

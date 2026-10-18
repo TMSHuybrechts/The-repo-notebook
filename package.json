@@ -10,7 +10,8 @@
     "preview": "node server/index.js --production",
     "app": "npm run build && electron .",
     "app:build": "npm run build && electron-builder",
-    "mcp": "node mcp/server.js"
+    "mcp": "node mcp/server.js",
+    "test:i18n": "node --test tests/i18n*.test.mjs"
   },
   "build": {
     "appId": "com.thomashuybrechts.reponotebook",
@@ -22,6 +23,7 @@
       "dist/**",
       "server/**",
       "mcp/**",
+      "shared/**",
       "electron/**",
       "public/**",
       "package.json"

@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import React, { useEffect, useState } from "react";
 import { Activity, AlertTriangle, Container, Copy, FolderOpen, GitBranch, Globe, List, Loader2, Play, RefreshCcw, Square, Zap } from "lucide-react";
 import { checkUpdatesAll, loadRuntimes, openLocalRepo, pullRepo, startContainer, startRepo, stopRepo } from "./api";
@@ -6,9 +7,9 @@ import { languageColor } from "./format";
 const uptime = (startedAt) => {
   if (!startedAt) return "";
   const minutes = Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 60000));
-  if (minutes < 1) return "net gestart";
+  if (minutes < 1) return t("net gestart");
   if (minutes < 60) return `${minutes} min`;
-  return `${Math.floor(minutes / 60)}u ${minutes % 60}m`;
+  return t("{0}u {1}m", [Math.floor(minutes / 60), minutes % 60]);
 };
 
 // Snelstart: alle gekloonde repos op één tab — start/stop, waar draait het,
@@ -72,14 +73,14 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
   };
 
   if (!items) {
-    return <div className="quickstart-empty"><Loader2 className="spin" size={22} /> Clones zoeken...</div>;
+    return <div className="quickstart-empty"><Loader2 className="spin" size={22} />{" "}{t("Clones zoeken...")}</div>;
   }
   if (!items.length) {
     return (
       <div className="quickstart-empty">
         <Zap size={34} />
-        <h2>Nog geen gekloonde repos</h2>
-        <p>Klonen doe je vanuit de lijst — daarna staan ze hier klaar om te starten.</p>
+        <h2>{t("Nog geen gekloonde repos")}</h2>
+        <p>{t("Klonen doe je vanuit de lijst — daarna staan ze hier klaar om te starten.")}</p>
       </div>
     );
   }
@@ -90,15 +91,14 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
   return (
     <div className="quickstart">
       <div className="quickstart-head">
-        <h2><Zap size={18} /> Snelstart</h2>
-        <span>{items.length} gekloond · {runningCount} draaiend{checkedAt ? ` · ${behindTotal} met updates` : ""}</span>
+        <h2><Zap size={18} />{" "}{t("Snelstart")}</h2>
+        <span>{items.length}{" "}{t("gekloond ·")}{" "}{runningCount}{" "}{t("draaiend")}{checkedAt ? t(" · {0} met updates", [behindTotal]) : ""}</span>
         <button className="updates-btn" disabled={busy === "updates"} onClick={checkAll} type="button">
-          {busy === "updates" ? <Loader2 className="spin" size={14} /> : <RefreshCcw size={14} />} Check alle updates
-        </button>
-        {error && <span className="quickstart-error">{error}</span>}
+          {busy === "updates" ? <Loader2 className="spin" size={14} /> : <RefreshCcw size={14} />}{" "}{t("Check alle updates")}</button>
+        {error && <span className="quickstart-error">{t(error)}</span>}
       </div>
       {warning && (
-        <div className="port-warning"><AlertTriangle size={15} /> {warning}</div>
+        <div className="port-warning"><AlertTriangle size={15} /> {t(warning)}</div>
       )}
       <div className="quickstart-grid">
         {items.map((item) => {
@@ -106,18 +106,18 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
           return (
             <article className={`runcard ${item.running ? "running" : ""}`} key={item.id}>
               <div className="runcard-head">
-                <span className={`run-dot ${item.running ? "on" : ""}`} title={item.running ? "Draait" : "Gestopt"} />
+                <span className={`run-dot ${item.running ? "on" : ""}`} title={item.running ? t("Draait") : t("Gestopt")} />
                 <strong>{item.name}</strong>
                 <small>{item.owner}</small>
                 {item.language && <i className="lang-dot" style={{ background: languageColor(item.language) }} title={item.language} />}
               </div>
               <div className="runcard-meta">
                 <span className="run-type">{item.type}</span>
-                {item.installStatus === "installed" && <span className="run-installed">geïnstalleerd</span>}
-                {!item.running && item.lastPort && <span className="run-port" title={item.lastUrl}>meestal :{item.lastPort}</span>}
-                {behindCount > 0 && <span className="run-behind">{behindCount} achter</span>}
-                {item.containerMode && <span className="run-container" title="Start gebeurt in een Docker-container"><Container size={11} /> container</span>}
-                {dups[item.id] && <span className="run-dup" title={dups[item.id]}><Copy size={11} /> ook elders</span>}
+                {item.installStatus === "installed" && <span className="run-installed">{t("geïnstalleerd")}</span>}
+                {!item.running && item.lastPort && <span className="run-port" title={item.lastUrl}>{t("meestal :")}{item.lastPort}</span>}
+                {behindCount > 0 && <span className="run-behind">{behindCount}{" "}{t("achter")}</span>}
+                {item.containerMode && <span className="run-container" title={t("Start gebeurt in een Docker-container")}><Container size={11} /> container</span>}
+                {dups[item.id] && <span className="run-dup" title={dups[item.id]}><Copy size={11} />{" "}{t("ook elders")}</span>}
                 {item.running && (
                   <span className="run-live"><Activity size={12} /> PID {item.pid} · {uptime(item.startedAt)}{item.mode === "container" ? " · in container" : ""}</span>
                 )}
@@ -134,7 +134,7 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
                     {busy === `stop:${item.id}` ? <Loader2 className="spin" size={15} /> : <Square size={15} />} Stop
                   </button>
                 ) : (
-                  <button className="primary" disabled={!item.canStart || busy === `start:${item.id}`} onClick={() => act(item, "start")} title={item.canStart ? item.startLabel : "Geen startcommando gedetecteerd"} type="button">
+                  <button className="primary" disabled={!item.canStart || busy === `start:${item.id}`} onClick={() => act(item, "start")} title={item.canStart ? item.startLabel : t("Geen startcommando gedetecteerd")} type="button">
                     {busy === `start:${item.id}` ? <Loader2 className="spin" size={15} /> : <Play size={15} />} Start
                   </button>
                 )}
@@ -143,8 +143,8 @@ export function QuickstartView({ dups = {}, onOpenRepo }) {
                     {busy === `pull:${item.id}` ? <Loader2 className="spin" size={15} /> : <GitBranch size={15} />} Pull
                   </button>
                 )}
-                <button onClick={() => act(item, "open")} title="Open map in verkenner" type="button"><FolderOpen size={15} /></button>
-                <button onClick={() => onOpenRepo(item.id)} title="Open in lijst" type="button"><List size={15} /></button>
+                <button onClick={() => act(item, "open")} title={t("Open map in verkenner")} type="button"><FolderOpen size={15} /></button>
+                <button onClick={() => onOpenRepo(item.id)} title={t("Open in lijst")} type="button"><List size={15} /></button>
               </div>
             </article>
           );

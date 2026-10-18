@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, EyeOff, List, Loader2, Maximize2, Network, Star, X } from "lucide-react";
 import { shortNumber } from "./format";
@@ -13,10 +14,10 @@ export const clusterColor = (index) => CLUSTER_COLORS[index % CLUSTER_COLORS.len
 export const edgeReasons = (edge) => {
   const reasons = [];
   if (edge.sharedTopics?.length) reasons.push({ kind: "topics", label: edge.sharedTopics.slice(0, 3).join(" · ") });
-  if (edge.sameCategory) reasons.push({ kind: "flag", label: "zelfde categorie" });
-  if (edge.sameOwner) reasons.push({ kind: "flag", label: "zelfde maker" });
-  if (edge.sharedTerms?.length) reasons.push({ kind: "text", label: `tekst: ${edge.sharedTerms.slice(0, 3).join(", ")}` });
-  if (edge.sameLanguage && !edge.sharedTopics?.length) reasons.push({ kind: "flag", label: "zelfde taal" });
+  if (edge.sameCategory) reasons.push({ kind: "flag", label: t("zelfde categorie") });
+  if (edge.sameOwner) reasons.push({ kind: "flag", label: t("zelfde maker") });
+  if (edge.sharedTerms?.length) reasons.push({ kind: "text", label: t("tekst: {0}", [edge.sharedTerms.slice(0, 3).join(", ")]) });
+  if (edge.sameLanguage && !edge.sharedTopics?.length) reasons.push({ kind: "flag", label: t("zelfde taal") });
   return reasons;
 };
 
@@ -32,7 +33,7 @@ function RelatedRows({ graph, repoId, onSelect, limit = 6 }) {
   const nodes = useMemo(() => new Map((graph?.nodes || []).map((node) => [node.id, node])), [graph]);
   const related = useMemo(() => edgesFor(graph, repoId).slice(0, limit), [graph, repoId, limit]);
 
-  if (!related.length) return <p className="muted">Nog geen verwante repos gevonden.</p>;
+  if (!related.length) return <p className="muted">{t("Nog geen verwante repos gevonden.")}</p>;
   return (
     <div className="related-rows">
       {related.map((edge) => {
@@ -44,7 +45,7 @@ function RelatedRows({ graph, repoId, onSelect, limit = 6 }) {
               <i style={{ background: clusterColor(other.cluster) }} />
               <strong>{other.name}</strong>
               <small>{other.owner}</small>
-              {edge.hidden && <span className="hidden-badge">verborgen link</span>}
+              {edge.hidden && <span className="hidden-badge">{t("verborgen link")}</span>}
               <span className="related-score">{Math.round(edge.score * 100)}%</span>
             </span>
             <span className="related-reasons">
@@ -65,7 +66,7 @@ export function RelatedPanel({ graph, repo, onSelect }) {
   return (
     <section className="panel related">
       <div className="panel-head">
-        <h2><Network size={16} /> Verwante repos</h2>
+        <h2><Network size={16} />{" "}{t("Verwante repos")}</h2>
       </div>
       <RelatedRows graph={graph} onSelect={onSelect} repoId={repo.id} />
     </section>
@@ -385,7 +386,7 @@ export function GraphView({ graph, loading, onOpenRepo }) {
         ref={canvasRef}
       />
       {loading && (
-        <div className="graph-loading"><Loader2 className="spin" size={22} /> Kaart berekenen...</div>
+        <div className="graph-loading"><Loader2 className="spin" size={22} />{" "}{t("Kaart berekenen...")}</div>
       )}
       {graph && (
         <aside className="graph-legend">
@@ -404,11 +405,11 @@ export function GraphView({ graph, loading, onOpenRepo }) {
           ))}
           <div className="legend-actions">
             <button className={onlyHidden ? "active" : ""} onClick={() => setOnlyHidden((v) => !v)} type="button">
-              <EyeOff size={13} /> Verborgen links ({hiddenCount})
+              <EyeOff size={13} />{" "}{t("Verborgen links (")}{hiddenCount})
             </button>
-            <button onClick={resetView} title="Zoom terugzetten" type="button"><Maximize2 size={13} /></button>
+            <button onClick={resetView} title={t("Zoom terugzetten")} type="button"><Maximize2 size={13} /></button>
           </div>
-          <p className="legend-hint">Klik = selecteer · dubbelklik = open in lijst · sleep = verplaats</p>
+          <p className="legend-hint">{t("Klik = selecteer · dubbelklik = open in lijst · sleep = verplaats")}</p>
         </aside>
       )}
       {selectedNode && (
@@ -424,10 +425,10 @@ export function GraphView({ graph, loading, onOpenRepo }) {
             <div className="topics">{selectedNode.topics.slice(0, 6).map((topic) => <span key={topic}>{topic}</span>)}</div>
           )}
           <div className="graph-card-actions">
-            <button className="primary" onClick={() => onOpenRepo(selectedNode.id)} type="button"><List size={14} /> Open in lijst</button>
+            <button className="primary" onClick={() => onOpenRepo(selectedNode.id)} type="button"><List size={14} />{" "}{t("Open in lijst")}</button>
             <a href={`https://github.com/${selectedNode.fullName}`} rel="noreferrer" target="_blank"><ExternalLink size={14} /> GitHub</a>
           </div>
-          <h4>Gelinkt met</h4>
+          <h4>{t("Gelinkt met")}</h4>
           <RelatedRows graph={graph} limit={8} onSelect={setSelectedId} repoId={selectedNode.id} />
         </aside>
       )}

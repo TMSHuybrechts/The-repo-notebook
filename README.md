@@ -4,6 +4,13 @@
 
 Repo Notebook is a local desktop app (and plain Node app) for the GitHub repositories you want to *try*, not just star. Paste a URL and it saves the repo with metadata and README; one click more and it clones, detects how the project runs, installs it and starts it — with live logs, in one window. Everything stays on your machine in a single JSON file.
 
+The interface is available in **English and Dutch**. Use **EN / NL** in the header
+to switch immediately; the app remembers your choice on this device. English is
+the default. Navigation, dialogs, tooltips, app errors, and dates follow your
+language. Your own notes, README content, repository details, and terminal output
+stay as written. New AI verdicts use the selected language; saved verdicts remain
+as generated until you refresh them.
+
 ![Repo Notebook demo: paste a GitHub URL, clone it, install with live logs](docs/img/demo.gif)
 
 *Paste a URL, clone, and install with live logs: about 25 seconds, no terminal.*

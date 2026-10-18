@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildGraph } from "./graph.js";
 import { createRepoNotebookMcpServer, MCP_VERSION } from "../mcp/server.js";
+import { normalizeLocale, translate } from "../shared/i18n.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -24,6 +25,22 @@ const terminalSessions = new Map();
 let trendingCache = { fetchedAt: "", repos: [] };
 
 const app = express();
+
+// Language is a presentation preference; it never changes stored repository data.
+app.use((req, res, next) => {
+  req.locale = normalizeLocale((req.get("Accept-Language") || "en").split(/[,;]/)[0]);
+  const sendJson = res.json.bind(res);
+  res.json = (body) => {
+    if (req.path.startsWith("/api/") && body && typeof body === "object" && !Array.isArray(body)) {
+      body = { ...body };
+      for (const key of ["error", "portWarning"]) {
+        if (typeof body[key] === "string") body[key] = translate(body[key], [], req.locale);
+      }
+    }
+    return sendJson(body);
+  };
+  next();
+});
 
 // --- Localhost guard -------------------------------------------------------
 // This app clones, installs and RUNS arbitrary code, so it must only ever be
@@ -1571,7 +1588,7 @@ app.post("/api/notebook/:owner/:repo/delete-clone", async (req, res) => {
 });
 
 // --- AI "is this worth trying?" verdict (only when ANTHROPIC_API_KEY is set). ---
-const buildVerdictPrompt = (repo) => `Je helpt beslissen of een GitHub-repo de moeite is om te proberen. Wees eerlijk en beknopt.
+const buildVerdictPrompt = (repo, locale = "en") => `Help decide whether a GitHub repository is worth trying. Be honest and concise.
 
 Repo: ${repo.fullName}
 Beschrijving: ${repo.description || "(geen)"}
@@ -1582,7 +1599,7 @@ Topics: ${(repo.topics || []).join(", ") || "(geen)"}
 README (ingekort):
 ${(repo.readme || "(geen readme)").slice(0, 4000)}
 
-Antwoord in het Nederlands, max 6 zinnen:
+Answer in ${locale === "nl" ? "Dutch" : "English"}, using at most 6 sentences:
 1. Wat doet dit precies? (1-2 zinnen)
 2. Voor wie / wanneer nuttig?
 3. Indruk van kwaliteit/activiteit (onderhouden? af?).
@@ -1593,15 +1610,15 @@ app.post("/api/notebook/:owner/:repo/verdict", async (req, res) => {
     const store = await readStore();
     const repo = findRepo(store, req.params.owner, req.params.repo);
     if (!repo) return res.status(404).json({ error: "Repository is not saved yet." });
-    if (repo.aiVerdict && !req.body?.refresh) {
+    if (repo.aiVerdict && (repo.aiVerdictLanguage || "nl") === req.locale && !req.body?.refresh) {
       return res.json({ available: true, verdict: repo.aiVerdict, provider: repo.aiProvider || "", cached: true });
     }
 
-    const result = await callAi(buildVerdictPrompt(repo));
+    const result = await callAi(buildVerdictPrompt(repo, req.locale));
     if (!result.available) return res.json({ available: false, provider: result.provider });
 
     const verdict = result.text;
-    const updated = await patchRepo(repo, { aiVerdict: verdict, aiVerdictAt: new Date().toISOString(), aiProvider: result.provider });
+    const updated = await patchRepo(repo, { aiVerdict: verdict, aiVerdictAt: new Date().toISOString(), aiProvider: result.provider, aiVerdictLanguage: req.locale });
     res.json({ available: true, verdict, provider: result.provider, model: result.model || "", repo: updated });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -1635,9 +1652,9 @@ app.post("/api/verdicts/bulk", async (req, res) => {
       for (const repo of missing) {
         bulkVerdict.current = repo.fullName;
         try {
-          const result = await callAi(buildVerdictPrompt(repo));
+          const result = await callAi(buildVerdictPrompt(repo, req.locale));
           if (!result.available) throw new Error("AI-provider weggevallen");
-          await patchRepo(repo, { aiVerdict: result.text, aiVerdictAt: new Date().toISOString(), aiProvider: result.provider });
+          await patchRepo(repo, { aiVerdict: result.text, aiVerdictAt: new Date().toISOString(), aiProvider: result.provider, aiVerdictLanguage: req.locale });
           consecutiveErrors = 0;
         } catch (error) {
           consecutiveErrors += 1;

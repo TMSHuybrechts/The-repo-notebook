@@ -1,3 +1,4 @@
+import { t, setLocale, useLocale } from "./i18n.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -58,12 +59,12 @@ const repoText = (repo) =>
 
 // Health from last-push age + archived flag — a quick "is this alive?" read.
 const repoHealth = (repo) => {
-  if (repo.archived) return { key: "archived", label: "Gearchiveerd", color: "#8b949e" };
+  if (repo.archived) return { key: "archived", label: t("Gearchiveerd"), color: "#8b949e" };
   if (!repo.pushedAt) return null;
   const days = (Date.now() - Date.parse(repo.pushedAt)) / 86400000;
-  if (days <= 90) return { key: "active", label: "Actief", color: "#4fd1a5" };
-  if (days <= 365) return { key: "quiet", label: "Stil", color: "#f0b429" };
-  return { key: "stale", label: "Verouderd", color: "#f0883e" };
+  if (days <= 90) return { key: "active", label: t("Actief"), color: "#4fd1a5" };
+  if (days <= 365) return { key: "quiet", label: t("Stil"), color: "#f0b429" };
+  return { key: "stale", label: t("Verouderd"), color: "#f0883e" };
 };
 
 const formatBytes = (bytes) => {
@@ -179,6 +180,8 @@ const sorted = (repos) =>
   [...repos].sort((a, b) => repoSorter.compare(a.name, b.name) || repoSorter.compare(a.owner, b.owner));
 
 function App() {
+  const locale = useLocale();
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const [repos, setRepos] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [letter, setLetter] = useState("");
@@ -361,7 +364,7 @@ function App() {
       setSelectedId(repo.id);
       setLetter(repoLetter(repo));
       if (options.clear) setUrl("");
-      setNotice(existed ? `Stond al in je notebook — bijgewerkt: ${repo.fullName}` : `Toegevoegd: ${repo.fullName}`);
+      setNotice(existed ? t("Stond al in je notebook — bijgewerkt: {0}", [repo.fullName]) : t("Toegevoegd: {0}", [repo.fullName]));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -392,7 +395,7 @@ function App() {
   };
 
   const remove = async () => {
-    if (!selected || !confirm(`${selected.fullName} verwijderen uit Repo Notebook?`)) return;
+    if (!selected || !confirm(t("{0} verwijderen uit Repo Notebook?", [selected.fullName]))) return;
     setBusy("remove");
     setError("");
     try {
@@ -429,31 +432,28 @@ function App() {
 
   return (
     <main className="app">
-      <TopBar busy={busy} error={error} notice={notice} openAdd={() => setAddOpen(true)} openMcp={() => setMcpOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
+      <TopBar busy={busy} error={t(error)} notice={t(notice)} openAdd={() => setAddOpen(true)} openMcp={() => setMcpOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
       <TrendingTicker busy={busy} error={trendingError} onSave={saveTrending} repos={trending} />
       <div className="viewbar">
         <div className="viewbar-tools">
           {((config.aiProvider === "ollama" && missingVerdicts > 0) || aiJob) && (
-            <button className="ai-bulk" disabled={Boolean(aiJob?.running)} onClick={runBulkAi} title="Laat de lokale AI (Ollama) alle repos zonder oordeel afwerken — enkel zichtbaar als Ollama draait" type="button">
+            <button className="ai-bulk" disabled={Boolean(aiJob?.running)} onClick={runBulkAi} title={t("Laat de lokale AI (Ollama) alle repos zonder oordeel afwerken — enkel zichtbaar als Ollama draait")} type="button">
               {aiJob?.running ? <Loader2 className="spin" size={14} /> : <Sparkles size={14} />}
               {aiJob?.running
-                ? `AI-oordelen: ${aiJob.done}/${aiJob.total}${aiJob.current ? ` — ${aiJob.current}` : ""}`
+                ? t("AI-oordelen: {0}/{1}{2}", [aiJob.done, aiJob.total, aiJob.current ? ` — ${aiJob.current}` : ""])
                 : aiJob
-                  ? `AI klaar (${aiJob.done}/${aiJob.total}${aiJob.errors?.length ? `, ${aiJob.errors.length} fouten` : ""})`
-                  : `AI-oordelen aanvullen (${missingVerdicts})`}
+                  ? t("AI klaar ({0}/{1}{2})", [aiJob.done, aiJob.total, aiJob.errors?.length ? t(", {0} fouten", [aiJob.errors.length]) : ""])
+                  : t("AI-oordelen aanvullen ({0})", [missingVerdicts])}
             </button>
           )}
         </div>
         <div className="segment view-switch">
           <button className={view === "list" ? "active" : ""} onClick={() => setView("list")} type="button">
-            <List size={15} /> Lijst
-          </button>
+            <List size={15} />{" "}{t("Lijst")}</button>
           <button className={view === "map" ? "active" : ""} onClick={() => setView("map")} type="button">
-            <Network size={15} /> Kaart
-          </button>
+            <Network size={15} />{" "}{t("Kaart")}</button>
           <button className={view === "run" ? "active" : ""} onClick={() => setView("run")} type="button">
-            <Zap size={15} /> Snelstart
-          </button>
+            <Zap size={15} />{" "}{t("Snelstart")}</button>
         </div>
       </div>
       {view === "map" ? (
@@ -522,37 +522,49 @@ function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, 
       <div className="brand">
         <BookOpen size={24} />
         <span>Repo Notebook</span>
-        <button className="mcp-chip" onClick={openMcp} title="MCP-server: koppel Claude Code, Codex of een andere agent" type="button">
+        <LanguageSwitcher />
+        <button className="mcp-chip" onClick={openMcp} title={t("MCP-server: koppel Claude Code, Codex of een andere agent")} type="button">
           <span /> MCP
         </button>
       </div>
       <form className="save-form" onSubmit={save}>
         <input
-          aria-label="GitHub repository URL"
+          aria-label={t("GitHub repository URL")}
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="GitHub repo-URL plakken"
+          placeholder={t("GitHub repo-URL plakken")}
           value={url}
         />
         <button className="primary" disabled={busy === "save"}>
-          {busy === "save" ? <Loader2 className="spin" size={17} /> : <Github size={17} />}
-          Repo opslaan
-        </button>
+          {busy === "save" ? <Loader2 className="spin" size={17} /> : <Github size={17} />}{t("Repo opslaan")}</button>
       </form>
-      <button className="ghost add-btn" onClick={openAdd} title="Bulk toevoegen, Stars importeren, import/export" type="button">
-        <ClipboardList size={16} /> Toevoegen
-      </button>
+      <button className="ghost add-btn" onClick={openAdd} title={t("Bulk toevoegen, Stars importeren, import/export")} type="button">
+        <ClipboardList size={16} />{" "}{t("Toevoegen")}</button>
       <label className="search">
         <Search size={18} />
         <input
-          aria-label="Zoek opgeslagen repositories"
+          aria-label={t("Zoek opgeslagen repositories")}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Zoek opgeslagen repos..."
+          placeholder={t("Zoek opgeslagen repos...")}
           value={query}
         />
       </label>
-      {error && <div className="toast">{error}</div>}
-      {!error && notice && <div className="toast notice">{notice}</div>}
+      {error && <div className="toast">{t(error)}</div>}
+      {!error && notice && <div className="toast notice">{t(notice)}</div>}
     </header>
+  );
+}
+
+function LanguageSwitcher() {
+  const locale = useLocale();
+  return (
+    <div className="language-switch" role="group" aria-label={t("Taal kiezen")}>
+      {[["en", "English"], ["nl", "Nederlands"]].map(([code, label]) => (
+        <button key={code} type="button" lang={code} aria-label={label}
+          aria-pressed={locale === code} onClick={() => setLocale(code)}>
+          {code.toUpperCase()}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -565,10 +577,10 @@ function TrendingTicker({ busy, error, onSave, repos }) {
   };
 
   return (
-    <section className="ticker" aria-label="GitHub Top 10 lichtkrant">
+    <section className="ticker" aria-label={t("GitHub Top 10 lichtkrant")}>
       <div className="ticker-label">
         <Radio size={16} />
-        <span>Top 10 nu</span>
+        <span>{t("Top 10 nu")}</span>
       </div>
       {repos.length ? (
         <div className="ticker-track">
@@ -577,44 +589,42 @@ function TrendingTicker({ busy, error, onSave, repos }) {
               const saving = busy === `trend:${repo.id}`;
               return (
                 <article className="ticker-item" key={`${repo.id}-${index}`}>
-                  <button className="ticker-link" disabled={saving} onClick={(event) => saveFromTicker(event, repo)} title="Opslaan in notebook" type="button">
+                  <button className="ticker-link" disabled={saving} onClick={(event) => saveFromTicker(event, repo)} title={t("Opslaan in notebook")} type="button">
                     <strong>{(index % repos.length) + 1}. {repo.fullName}</strong>
-                    <span>{repo.description || "Net populair op GitHub"}</span>
+                    <span>{repo.description || t("Net populair op GitHub")}</span>
                   </button>
                   <span className="ticker-meta">
                     <Star size={13} /> {shortNumber(repo.stars)}
                     {repo.language && <><i style={{ background: languageColor(repo.language) }} /> {repo.language}</>}
                   </span>
                   <a
-                    aria-label={`Open ${repo.fullName} op GitHub`}
+                    aria-label={t("Open {0} op GitHub", [repo.fullName])}
                     className="ticker-open"
                     href={repo.htmlUrl}
                     rel="noreferrer"
                     target="_blank"
-                    title="Open op GitHub"
+                    title={t("Open op GitHub")}
                   >
                     <ExternalLink size={14} />
                   </a>
-                  <button disabled={saving} onClick={(event) => saveFromTicker(event, repo)} title="Opslaan in notebook" type="button">
-                    {saving ? <Loader2 className="spin" size={14} /> : <Plus size={14} />}
-                    Opslaan
-                  </button>
+                  <button disabled={saving} onClick={(event) => saveFromTicker(event, repo)} title={t("Opslaan in notebook")} type="button">
+                    {saving ? <Loader2 className="spin" size={14} /> : <Plus size={14} />}{t("Opslaan")}</button>
                 </article>
               );
             })}
           </div>
         </div>
       ) : (
-        <div className="ticker-empty">Top 10 niet bereikbaar</div>
+        <div className="ticker-empty">{t("Top 10 niet bereikbaar")}</div>
       )}
-      {error && <div className="ticker-error">{error}</div>}
+      {error && <div className="ticker-error">{t(error)}</div>}
     </section>
   );
 }
 
 function LetterRail({ groups, letter, setLetter }) {
   return (
-    <nav className="letters" aria-label="Alfabetische navigatie">
+    <nav className="letters" aria-label={t("Alfabetische navigatie")}>
       <button className={!letter ? "active" : ""} onClick={() => setLetter("")}>A-Z</button>
       {letters.map((item) => (
         <button
@@ -643,22 +653,21 @@ function NotebookList({ categories, catFilter, filtered, repos, selected, setCat
       <div className="list-head">
         <span>{filtered.length === repos.length ? `${repos.length} repositories` : `${filtered.length} / ${repos.length}`}</span>
         {activeFilters && (
-          <button onClick={() => { setCatFilter(""); setStatusFilter(""); setLetter(""); }}>
-            Wis filters <X size={13} />
+          <button onClick={() => { setCatFilter(""); setStatusFilter(""); setLetter(""); }}>{t("Wis filters")}{" "}<X size={13} />
           </button>
         )}
       </div>
       <div className="filterbar">
-        <select aria-label="Filter op categorie" value={catFilter} onChange={(event) => setCatFilter(event.target.value)}>
-          <option value="">Alle categorieën</option>
+        <select aria-label={t("Filter op categorie")} value={catFilter} onChange={(event) => setCatFilter(event.target.value)}>
+          <option value="">{t("Alle categorieën")}</option>
           {categories.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
           ))}
         </select>
-        <select aria-label="Filter op status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="">Alle statussen</option>
+        <select aria-label={t("Filter op status")} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="">{t("Alle statussen")}</option>
           {STATUS_ORDER.map((key) => (
-            <option key={key} value={key}>{STATUS[key].label}</option>
+            <option key={key} value={key}>{t(STATUS[key].label)}</option>
           ))}
         </select>
       </div>
@@ -684,7 +693,7 @@ function NotebookList({ categories, catFilter, filtered, repos, selected, setCat
                         {health && <span className="health-dot" style={{ background: health.color }} title={health.label} />}
                         {repo.status && STATUS[repo.status] && (
                           <span className="status-badge" style={{ color: STATUS[repo.status].color, borderColor: STATUS[repo.status].color }}>
-                            {STATUS[repo.status].label}
+                            {t(STATUS[repo.status].label)}
                           </span>
                         )}
                         {repo.category && <span className="cat-chip">{repo.category}</span>}
@@ -706,7 +715,7 @@ function EmptyList() {
   return (
     <div className="empty">
       <Github size={34} />
-      <h2>Geen repos</h2>
+      <h2>{t("Geen repos")}</h2>
     </div>
   );
 }
@@ -721,7 +730,7 @@ function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, on
     return (
       <section className="detail empty-detail">
         <Github size={56} />
-        <h1>Geen repository geselecteerd</h1>
+        <h1>{t("Geen repository geselecteerd")}</h1>
       </section>
     );
   }
@@ -736,7 +745,7 @@ function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, on
           <h1>{repo.owner} <span>/</span> {repo.name}</h1>
           <span className="badge">{repo.visibility}</span>
           {repo.status && STATUS[repo.status] && (
-            <span className="badge status" style={{ background: STATUS[repo.status].color }}>{STATUS[repo.status].label}</span>
+            <span className="badge status" style={{ background: STATUS[repo.status].color }}>{t(STATUS[repo.status].label)}</span>
           )}
           {repo.category && <span className="badge cat">{repo.category}</span>}
           {health && (
@@ -747,27 +756,21 @@ function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, on
         </div>
         <div className="actions">
           <button onClick={() => setCloneFor(repo)}>
-            <HardDriveDownload size={17} /> Klonen
-          </button>
+            <HardDriveDownload size={17} />{" "}{t("Klonen")}</button>
           {repo.localPath && (
             <>
               <button disabled={busy === "open-local"} onClick={openLocal}>
-                {busy === "open-local" ? <Loader2 className="spin" size={16} /> : <FolderOpen size={17} />}
-                Open map
-              </button>
-              <button className={terminalOpen ? "active" : ""} onClick={() => setTerminalOpen((open) => !open)} title="Terminal in de clone-map">
+                {busy === "open-local" ? <Loader2 className="spin" size={16} /> : <FolderOpen size={17} />}{t("Open map")}</button>
+              <button className={terminalOpen ? "active" : ""} onClick={() => setTerminalOpen((open) => !open)} title={t("Terminal in de clone-map")}>
                 <Terminal size={17} /> Terminal
               </button>
             </>
           )}
-          <a href={repo.htmlUrl} rel="noreferrer" target="_blank">
-            Open op GitHub <ExternalLink size={16} />
+          <a href={repo.htmlUrl} rel="noreferrer" target="_blank">{t("Open op GitHub")}{" "}<ExternalLink size={16} />
           </a>
           <button disabled={busy === "refresh"} onClick={refresh}>
-            {busy === "refresh" ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
-            Ververs
-          </button>
-          <button className="danger" disabled={busy === "remove"} onClick={remove} title="Verwijderen uit notebook">
+            {busy === "refresh" ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}{t("Ververs")}</button>
+          <button className="danger" disabled={busy === "remove"} onClick={remove} title={t("Verwijderen uit notebook")}>
             <Trash2 size={16} />
           </button>
         </div>
@@ -775,7 +778,7 @@ function RepoDetail({ busy, categories, config, dupPath, graph, onRepoUpdate, on
       <div className="tabs">
         {["readme", "files", "about"].map((item) => (
           <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>
-            {item === "readme" ? "README" : item === "files" ? "Bestanden" : "Over"}
+            {item === "readme" ? "README" : item === "files" ? t("Bestanden") : t("Over")}
           </button>
         ))}
       </div>
@@ -874,7 +877,7 @@ function TerminalDock({ onClose, repo }) {
   };
 
   return (
-    <aside aria-label={`Terminal voor ${repo.fullName}`} className="terminal-dock">
+    <aside aria-label={t("Terminal voor {0}", [repo.fullName])} className="terminal-dock">
       <div className="terminal-head">
         <span>
           <Terminal size={16} /> Terminal <small>{repo.fullName}{terminal?.shell ? ` · ${terminal.shell}` : ""}</small>
@@ -883,13 +886,13 @@ function TerminalDock({ onClose, repo }) {
           {terminal?.running ? (
             <button disabled={busy === "stop"} onClick={() => act("stop", () => stopTerminal(repo))}><Square size={14} /> Stop</button>
           ) : (
-            <button disabled={busy === "start"} onClick={() => act("start", () => startTerminal(repo))}><Play size={14} /> Open terminal</button>
+            <button disabled={busy === "start"} onClick={() => act("start", () => startTerminal(repo))}><Play size={14} />{" "}{t("Open terminal")}</button>
           )}
-          <button disabled={!terminal?.output || busy === "clear"} onClick={() => act("clear", () => clearTerminal(repo))}>Wis</button>
-          <button aria-label="Terminal sluiten" className="icon" onClick={onClose}><X size={15} /></button>
+          <button disabled={!terminal?.output || busy === "clear"} onClick={() => act("clear", () => clearTerminal(repo))}>{t("Wis")}</button>
+          <button aria-label={t("Terminal sluiten")} className="icon" onClick={onClose}><X size={15} /></button>
         </div>
       </div>
-      <pre className="terminal-output" ref={outputRef}>{terminal?.output || (terminal ? "Terminal gestopt." : "Terminal starten…")}</pre>
+      <pre className="terminal-output" ref={outputRef}>{terminal?.output || (terminal ? t("Terminal gestopt.") : t("Terminal starten…"))}</pre>
       <form className="terminal-input" onSubmit={submit}>
         <span>$</span>
         <input
@@ -897,15 +900,15 @@ function TerminalDock({ onClose, repo }) {
           disabled={!terminal?.running || busy === "input"}
           onChange={(event) => setCommand(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={terminal?.running ? "Typ een commando en druk Enter (↑ voor geschiedenis)" : "Terminal is gestopt"}
+          placeholder={terminal?.running ? t("Typ een commando en druk Enter (↑ voor geschiedenis)") : t("Terminal is gestopt")}
           ref={inputRef}
           spellCheck="false"
           value={command}
         />
-        <button disabled={!terminal?.running || !command.trim() || busy === "input"}>Uitvoeren</button>
+        <button disabled={!terminal?.running || !command.trim() || busy === "input"}>{t("Uitvoeren")}</button>
       </form>
-      {error && <div className="runtime-error">{error}</div>}
-      <small className="terminal-warning">Commando’s draaien lokaal in de clone-map, met jouw rechten. Voer alleen uit wat je vertrouwt.</small>
+      {error && <div className="runtime-error">{t(error)}</div>}
+      <small className="terminal-warning">{t("Commando’s draaien lokaal in de clone-map, met jouw rechten. Voer alleen uit wat je vertrouwt.")}</small>
     </aside>
   );
 }
@@ -926,7 +929,7 @@ function McpDialog({ onClose }) {
       setCopied(label);
       setTimeout(() => setCopied(""), 1800);
     } catch {
-      setError("Kopiëren naar het klembord lukte niet — selecteer de tekst handmatig.");
+      setError(t("Kopiëren naar het klembord lukte niet — selecteer de tekst handmatig."));
     }
   };
   const endpoint = status?.endpoint || "";
@@ -936,40 +939,38 @@ function McpDialog({ onClose }) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section aria-label="MCP-server" className="clone-modal mcp-modal" role="dialog">
+      <section aria-label={t("MCP-server")} className="clone-modal mcp-modal" role="dialog">
         <div className="modal-head">
           <div>
-            <h2>Repo Notebook als MCP-server</h2>
-            <p>Dezelfde notebook-tools (zoeken, opslaan, klonen, status zetten) voor Claude Code, Codex of elke andere MCP-client — via HTTP zolang de app draait, of via stdio.</p>
+            <h2>{t("Repo Notebook als MCP-server")}</h2>
+            <p>{t("Dezelfde notebook-tools (zoeken, opslaan, klonen, status zetten) voor Claude Code, Codex of elke andere MCP-client — via HTTP zolang de app draait, of via stdio.")}</p>
           </div>
-          <button aria-label="Sluit MCP-venster" className="icon" onClick={onClose}><X size={18} /></button>
+          <button aria-label={t("Sluit MCP-venster")} className="icon" onClick={onClose}><X size={18} /></button>
         </div>
-        {error && <div className="clone-error">{error}</div>}
-        {!status && !error && <div className="mcp-loading"><Loader2 className="spin" size={18} /> MCP-status laden…</div>}
+        {error && <div className="clone-error">{t(error)}</div>}
+        {!status && !error && <div className="mcp-loading"><Loader2 className="spin" size={18} />{" "}{t("MCP-status laden…")}</div>}
         {status && (
           <>
-            <div className="mcp-status"><CheckCircle2 size={18} /> Actief · alleen localhost · versie {status.version}</div>
+            <div className="mcp-status"><CheckCircle2 size={18} />{" "}{t("Actief · alleen localhost · versie")}{" "}{status.version}</div>
             <label className="mcp-field">
-              <span>HTTP-endpoint (Streamable HTTP)</span>
-              <div><code>{endpoint}</code><button onClick={() => copy("endpoint", endpoint)} type="button">{copied === "endpoint" ? "Gekopieerd" : "Kopieer"}</button></div>
+              <span>{t("HTTP-endpoint (Streamable HTTP)")}</span>
+              <div><code>{endpoint}</code><button onClick={() => copy("endpoint", endpoint)} type="button">{copied === "endpoint" ? t("Gekopieerd") : t("Kopieer")}</button></div>
             </label>
             <label className="mcp-field">
               <span>Claude Code</span>
-              <div><code>{claudeCommand}</code><button onClick={() => copy("claude", claudeCommand)} type="button">{copied === "claude" ? "Gekopieerd" : "Kopieer"}</button></div>
+              <div><code>{claudeCommand}</code><button onClick={() => copy("claude", claudeCommand)} type="button">{copied === "claude" ? t("Gekopieerd") : t("Kopieer")}</button></div>
             </label>
             <label className="mcp-field">
               <span>Codex CLI</span>
-              <div><code>{codexCommand}</code><button onClick={() => copy("codex", codexCommand)} type="button">{copied === "codex" ? "Gekopieerd" : "Kopieer"}</button></div>
+              <div><code>{codexCommand}</code><button onClick={() => copy("codex", codexCommand)} type="button">{copied === "codex" ? t("Gekopieerd") : t("Kopieer")}</button></div>
             </label>
             {stdioCommand && (
               <label className="mcp-field">
-                <span>Zonder draaiende app (stdio)</span>
-                <div><code>{stdioCommand}</code><button onClick={() => copy("stdio", stdioCommand)} type="button">{copied === "stdio" ? "Gekopieerd" : "Kopieer"}</button></div>
+                <span>{t("Zonder draaiende app (stdio)")}</span>
+                <div><code>{stdioCommand}</code><button onClick={() => copy("stdio", stdioCommand)} type="button">{copied === "stdio" ? t("Gekopieerd") : t("Kopieer")}</button></div>
               </label>
             )}
-            <div className="mcp-note">
-              De desktop-app gebruikt poort 5188 als die vrij is, anders een andere — de endpoint hierboven is die van nu (ook te vinden in <code>server.json</code> in de datamap). Alleen lokale clients kunnen erbij; de app zet niets open naar het internet.
-            </div>
+            <div className="mcp-note">{t("De desktop-app gebruikt poort 5188 als die vrij is, anders een andere — de endpoint hierboven is die van nu (ook te vinden in")}{" "}<code>server.json</code>{" "}{t("in de datamap). Alleen lokale clients kunnen erbij; de app zet niets open naar het internet.")}</div>
           </>
         )}
       </section>
@@ -980,11 +981,11 @@ function McpDialog({ onClose }) {
 function Stats({ repo }) {
   return (
     <div className="stats">
-      <span><Star size={17} /> {shortNumber(repo.stars)} stars</span>
+      <span><Star size={17} /> {shortNumber(repo.stars)} {t("sterren")}</span>
       <span><GitFork size={17} /> {shortNumber(repo.forks)} forks</span>
-      <span><Eye size={17} /> {shortNumber(repo.watchers)} watching</span>
+      <span><Eye size={17} /> {shortNumber(repo.watchers)} {t("volgend")}</span>
       <span><GitBranch size={17} /> {repo.defaultBranch}</span>
-      <span className="updated">Bijgewerkt {shortDate(repo.updatedAt)}</span>
+      <span className="updated">{t("Bijgewerkt")}{" "}{shortDate(repo.updatedAt)}</span>
     </div>
   );
 }
@@ -993,16 +994,16 @@ function Files({ repo }) {
   return (
     <section className="panel files">
       <div className="panel-head">
-        <h2>Bestanden</h2>
+        <h2>{t("Bestanden")}</h2>
         <span><GitBranch size={15} /> {repo.defaultBranch}</span>
       </div>
       <div className="file-table">
         {repo.files?.length ? repo.files.map((file) => (
           <a href={file.htmlUrl} key={file.path} rel="noreferrer" target="_blank">
             <span>{file.type === "dir" ? <Folder size={18} /> : <File size={18} />} {file.name}</span>
-            <small>{file.type === "dir" ? "map" : fileSize(file.size)}</small>
+            <small>{file.type === "dir" ? t("map") : fileSize(file.size)}</small>
           </a>
-        )) : <p className="muted">Geen rootbestanden gevonden.</p>}
+        )) : <p className="muted">{t("Geen rootbestanden gevonden.")}</p>}
       </div>
     </section>
   );
@@ -1015,14 +1016,13 @@ function Readme({ repo }) {
     <section className="panel readme">
       <div className="panel-head">
         <h2>README.md</h2>
-        <a href={readme?.htmlUrl || `${repo.htmlUrl}#readme`} rel="noreferrer" target="_blank">
-          Open op GitHub <ExternalLink size={16} />
+        <a href={readme?.htmlUrl || `${repo.htmlUrl}#readme`} rel="noreferrer" target="_blank">{t("Open op GitHub")}{" "}<ExternalLink size={16} />
         </a>
       </div>
       {repo.readme ? (
         <div className="readme-md" dangerouslySetInnerHTML={{ __html: renderReadme(repo.readme) }} />
       ) : (
-        <div className="readme-empty">README niet lokaal opgeslagen</div>
+        <div className="readme-empty">{t("README niet lokaal opgeslagen")}</div>
       )}
     </section>
   );
@@ -1031,17 +1031,17 @@ function Readme({ repo }) {
 function About({ dupPath, repo }) {
   return (
     <aside className="panel about">
-      <h2>Over</h2>
+      <h2>{t("Over")}</h2>
       {repo.description && <p>{repo.description}</p>}
       <dl>
         {repo.homepage && <><dt>Homepage</dt><dd><a href={repo.homepage} rel="noreferrer" target="_blank">{repo.homepage}</a></dd></>}
-        <dt>Taal</dt>
-        <dd>{repo.language ? <><i style={{ background: languageColor(repo.language) }} /> {repo.language}</> : "Onbekend"}</dd>
-        <dt>Licentie</dt>
-        <dd>{repo.license || "Onbekend"}</dd>
-        {repo.localPath && <><dt>Lokaal</dt><dd><code className="local-path">{repo.localPath}</code></dd></>}
-        {dupPath && <><dt>Ook gekloond in</dt><dd><code className="local-path dup-path" title="Deze repo staat al ergens anders op je schijf">{dupPath}</code></dd></>}
-        <dt>Opgeslagen</dt>
+        <dt>{t("Taal")}</dt>
+        <dd>{repo.language ? <><i style={{ background: languageColor(repo.language) }} /> {repo.language}</> : t("Onbekend")}</dd>
+        <dt>{t("Licentie")}</dt>
+        <dd>{repo.license || t("Onbekend")}</dd>
+        {repo.localPath && <><dt>{t("Lokaal")}</dt><dd><code className="local-path">{repo.localPath}</code></dd></>}
+        {dupPath && <><dt>{t("Ook gekloond in")}</dt><dd><code className="local-path dup-path" title={t("Deze repo staat al ergens anders op je schijf")}>{dupPath}</code></dd></>}
+        <dt>{t("Opgeslagen")}</dt>
         <dd>{shortDate(repo.savedAt)}</dd>
       </dl>
       {!!repo.topics?.length && (
@@ -1107,7 +1107,7 @@ function RuntimePanel({ onRepoUpdate, repo }) {
   };
 
   const removeClone = async () => {
-    if (!confirm(`Gekloonde bestanden van ${repo.fullName} verwijderen? (de opgeslagen repo blijft)`)) return;
+    if (!confirm(t("Gekloonde bestanden van {0} verwijderen? (de opgeslagen repo blijft)", [repo.fullName]))) return;
     setBusy("delete-clone");
     setError("");
     try {
@@ -1153,14 +1153,14 @@ function RuntimePanel({ onRepoUpdate, repo }) {
   return (
     <section className="panel runtime">
       <div className="panel-head">
-        <h2>Lokaal</h2>
-        <span>{runtime?.commands?.type || "Detectie"}</span>
+        <h2>{t("Lokaal")}</h2>
+        <span>{runtime?.commands?.type || t("Detectie")}</span>
       </div>
       <div className="runtime-body">
         <div className="runtime-actions">
           <button disabled={!install || busy === "install"} onClick={() => run("install")}>
             {busy === "install" ? <Loader2 className="spin" size={16} /> : <PackageCheck size={16} />}
-            Install
+            {t("Installeren")}
           </button>
           {runtime?.running ? (
             <button disabled={busy === "stop"} onClick={() => run("stop")}>
@@ -1188,24 +1188,23 @@ function RuntimePanel({ onRepoUpdate, repo }) {
         <div className="runtime-actions secondary">
           <button disabled={busy === "updates"} onClick={loadBehind}>
             {busy === "updates" ? <Loader2 className="spin" size={15} /> : <Activity size={15} />}
-            {behind === null ? "Updates?" : behind === 0 ? "Up-to-date" : `${behind} achter`}
+            {behind === null ? t("Updates?") : behind === 0 ? "Up-to-date" : t("{0} achter", [behind])}
           </button>
           <button disabled={busy === "size"} onClick={loadSize}>
             {busy === "size" ? <Loader2 className="spin" size={15} /> : <HardDriveDownload size={15} />}
-            {size === null ? "Schijfruimte" : formatBytes(size)}
+            {size === null ? t("Schijfruimte") : formatBytes(size)}
           </button>
-          <button className="danger" disabled={busy === "delete-clone"} onClick={removeClone} title="Verwijder gekloonde bestanden">
-            {busy === "delete-clone" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />} Clone weg
-          </button>
+          <button className="danger" disabled={busy === "delete-clone"} onClick={removeClone} title={t("Verwijder gekloonde bestanden")}>
+            {busy === "delete-clone" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}{" "}{t("Clone weg")}</button>
         </div>
         <div className="runtime-meta">
           {install && <code>{install.label}</code>}
           {start && <code>{start.label}</code>}
           {runtime?.running && <strong>PID {runtime.pid}</strong>}
           {runtime?.running && runtime?.mode === "container" && <strong className="mode-chip"><Container size={12} /> container</strong>}
-          {repo.installedAt && <span>Installed {shortDate(repo.installedAt)}</span>}
+          {repo.installedAt && <span>{t("Installed")}{" "}{shortDate(repo.installedAt)}</span>}
         </div>
-        {error && <div className="runtime-error">{error}</div>}
+        {error && <div className="runtime-error">{t(error)}</div>}
         <ContainerControls onRepoUpdate={onRepoUpdate} repo={repo} />
         <EnvEditor repo={repo} />
         {runtime?.log && <pre className="runtime-log">{runtime.log}</pre>}
@@ -1266,18 +1265,15 @@ function ContainerControls({ onRepoUpdate, repo }) {
           onChange={(event) => commit({ containerMode: event.target.checked })}
           type="checkbox"
         />
-        <Container size={15} /> In container draaien — install &amp; start in Docker, je PC blijft proper
-      </label>
+        <Container size={15} />{" "}{t("In container draaien — install & start in Docker, je PC blijft proper")}</label>
       {repo.containerMode && (
         <div className="container-opts">
-          <label className="container-port">
-            Poort
-            <input
+          <label className="container-port">{t("Poort")}<input
               inputMode="numeric"
               onBlur={() => (repo.containerPort || "") !== port.trim() && commit({ containerPort: port.trim() })}
               onChange={(event) => setPort(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
-              placeholder={repo.lastPort || "bv. 3000"}
+              placeholder={repo.lastPort || t("bv. 3000")}
               value={port}
             />
           </label>
@@ -1291,22 +1287,21 @@ function ContainerControls({ onRepoUpdate, repo }) {
           </label>
           {docker && (
             <span className={`docker-chip ${docker.running ? "on" : ""}`}>
-              Docker {docker.running ? "draait" : docker.installed ? "uit" : "ontbreekt"}
+              Docker {docker.running ? t("draait") : docker.installed ? t("uit") : t("ontbreekt")}
             </span>
           )}
           {docker && docker.installed && !docker.running && (
             <button disabled={busy === "start"} onClick={() => dockerAction("start")} type="button">
-              {busy === "start" ? <Loader2 className="spin" size={13} /> : <Play size={13} />} Start Docker (±30-60s)
-            </button>
+              {busy === "start" ? <Loader2 className="spin" size={13} /> : <Play size={13} />}{" "}{t("Start Docker (±30-60s)")}</button>
           )}
           {docker?.running && (
-            <button disabled={busy === "stop"} onClick={() => dockerAction("stop")} title="Sluit Docker Desktop af en geef RAM terug (kan enkel als er geen containers draaien)" type="button">
+            <button disabled={busy === "stop"} onClick={() => dockerAction("stop")} title={t("Sluit Docker Desktop af en geef RAM terug (kan enkel als er geen containers draaien)")} type="button">
               {busy === "stop" ? <Loader2 className="spin" size={13} /> : <Square size={13} />} Stop Docker
             </button>
           )}
         </div>
       )}
-      {error && <div className="env-error">{error}</div>}
+      {error && <div className="env-error">{t(error)}</div>}
     </div>
   );
 }
@@ -1365,9 +1360,8 @@ function EnvEditor({ repo }) {
     return (
       <div className="env-row">
         <button className="env-toggle" disabled={busy} onClick={load} type="button">
-          {busy ? <Loader2 className="spin" size={14} /> : <File size={14} />} .env bewerken
-        </button>
-        {error && <span className="env-error">{error}</span>}
+          {busy ? <Loader2 className="spin" size={14} /> : <File size={14} />}{" "}{t(".env bewerken")}</button>
+        {error && <span className="env-error">{t(error)}</span>}
       </div>
     );
   }
@@ -1375,13 +1369,13 @@ function EnvEditor({ repo }) {
   return (
     <div className="env-editor">
       <div className="env-head">
-        <strong><File size={14} /> .env {exists ? "" : "(nog niet aanwezig)"}</strong>
+        <strong><File size={14} /> .env {exists ? "" : t("(nog niet aanwezig)")}</strong>
         <div className="env-actions">
           {example && !content.trim() && (
-            <button onClick={() => setContent(example.content)} type="button">Vul met {example.name}</button>
+            <button onClick={() => setContent(example.content)} type="button">{t("Vul met")}{" "}{example.name}</button>
           )}
           <button className="primary" disabled={busy} onClick={save} type="button">
-            {busy ? <Loader2 className="spin" size={14} /> : <CheckCircle2 size={14} />} {savedTick ? "Bewaard" : "Bewaar"}
+            {busy ? <Loader2 className="spin" size={14} /> : <CheckCircle2 size={14} />} {savedTick ? t("Bewaard") : t("Bewaar")}
           </button>
           <button onClick={() => setOpen(false)} type="button"><X size={14} /></button>
         </div>
@@ -1389,12 +1383,12 @@ function EnvEditor({ repo }) {
       <textarea
         className="env-textarea"
         onChange={(event) => setContent(event.target.value)}
-        placeholder={example ? `Leeg — klik "Vul met ${example.name}" voor de template.` : "KEY=waarde"}
+        placeholder={example ? t("Leeg — klik \"Vul met {0}\" voor de template.", [example.name]) : t("KEY=waarde")}
         rows={Math.min(16, Math.max(6, content.split("\n").length + 1))}
         spellCheck={false}
         value={content}
       />
-      {error && <div className="env-error">{error}</div>}
+      {error && <div className="env-error">{t(error)}</div>}
     </div>
   );
 }
@@ -1425,12 +1419,12 @@ function CloneDialog({ onRepoUpdate, repo, setCloneFor }) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section aria-label="Repository klonen" className="clone-modal" role="dialog">
+      <section aria-label={t("Repository klonen")} className="clone-modal" role="dialog">
         <div className="modal-head">
           <div>
-            <h2>{repo.fullName} klonen</h2>
+            <h2>{repo.fullName}{" "}{t("klonen")}</h2>
           </div>
-          <button aria-label="Sluit clone-venster" className="icon" onClick={() => setCloneFor(null)}><X size={18} /></button>
+          <button aria-label={t("Sluit clone-venster")} className="icon" onClick={() => setCloneFor(null)}><X size={18} /></button>
         </div>
         <div className="segment">
           {["https", "ssh"].map((item) => (
@@ -1441,20 +1435,18 @@ function CloneDialog({ onRepoUpdate, repo, setCloneFor }) {
         </div>
         <div className="clone-url">
           <code>{cloneUrl}</code>
-          <button aria-label="Clone-commando kopieren" onClick={copy} title="Clone-commando kopieren"><Copy size={16} /></button>
+          <button aria-label={t("Clone-commando kopieren")} onClick={copy} title={t("Clone-commando kopieren")}><Copy size={16} /></button>
         </div>
         <button className="primary clone-run" disabled={busy} onClick={run}>
-          {busy ? <Loader2 className="spin" size={17} /> : <HardDriveDownload size={17} />}
-          Clone repository
-        </button>
+          {busy ? <Loader2 className="spin" size={17} /> : <HardDriveDownload size={17} />}{t("Clone repository")}</button>
         {result && (
           <div className="clone-result">
             <CheckCircle2 size={18} />
-            <span>{result.status === "exists" ? "Bestaat al:" : "Gekloond naar:"}</span>
+            <span>{result.status === "exists" ? t("Bestaat al:") : t("Gekloond naar:")}</span>
             <code>{result.path}</code>
           </div>
         )}
-        {error && <div className="clone-error">{error}</div>}
+        {error && <div className="clone-error">{t(error)}</div>}
       </section>
     </div>
   );
@@ -1502,7 +1494,7 @@ function MetaPanel({ categories, onRepoUpdate, repo }) {
   return (
     <section className="panel meta">
       <div className="panel-head">
-        <h2>Notitie &amp; status</h2>
+        <h2>{t("Notitie & status")}</h2>
         {saving && <Loader2 className="spin" size={14} />}
       </div>
       <div className="meta-body">
@@ -1517,13 +1509,13 @@ function MetaPanel({ categories, onRepoUpdate, repo }) {
                 style={status === key ? { background: STATUS[key].color, borderColor: STATUS[key].color, color: "#0b0e14" } : undefined}
                 type="button"
               >
-                {STATUS[key].label}
+                {t(STATUS[key].label)}
               </button>
             ))}
           </div>
         </div>
         <div className="meta-row">
-          <label htmlFor="meta-category">Categorie</label>
+          <label htmlFor="meta-category">{t("Categorie")}</label>
           <input
             autoComplete="off"
             id="meta-category"
@@ -1531,7 +1523,7 @@ function MetaPanel({ categories, onRepoUpdate, repo }) {
             onBlur={commitCategory}
             onChange={(event) => setCategory(event.target.value)}
             onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
-            placeholder="bv. AI, Hacking, van Insta"
+            placeholder={t("bv. AI, Hacking, van Insta")}
             value={category}
           />
           <datalist id="meta-categories">
@@ -1541,16 +1533,16 @@ function MetaPanel({ categories, onRepoUpdate, repo }) {
           </datalist>
         </div>
         <div className="meta-row">
-          <label htmlFor="meta-note">Notitie</label>
+          <label htmlFor="meta-note">{t("Notitie")}</label>
           <textarea
             id="meta-note"
             onBlur={commitNote}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Waarom sloeg je dit op? Wat wil je ermee?"
+            placeholder={t("Waarom sloeg je dit op? Wat wil je ermee?")}
             value={note}
           />
         </div>
-        {error && <div className="meta-error">{error}</div>}
+        {error && <div className="meta-error">{t(error)}</div>}
       </div>
     </section>
   );
@@ -1582,19 +1574,19 @@ function AddModal({ hasToken, onClose, onRepos, repos, setNotice }) {
       const data = await bulkSave(text);
       if (data.repos) onRepos(data.repos);
       const parts = [];
-      if (data.added?.length) parts.push(`${data.added.length} toegevoegd`);
-      if (data.existed?.length) parts.push(`${data.existed.length} bestond al`);
-      if (data.failed?.length) parts.push(`${data.failed.length} mislukt`);
-      setResult(parts.join(" · ") || "Geen GitHub-links gevonden.");
-      if (data.added?.length) setNotice(`Bulk: ${data.added.length} repo's toegevoegd`);
+      if (data.added?.length) parts.push(t("{0} toegevoegd", [data.added.length]));
+      if (data.existed?.length) parts.push(t("{0} bestond al", [data.existed.length]));
+      if (data.failed?.length) parts.push(t("{0} mislukt", [data.failed.length]));
+      setResult(parts.join(" · ") || t("Geen GitHub-links gevonden."));
+      if (data.added?.length) setNotice(t("Bulk: {0} repo's toegevoegd", [data.added.length]));
     });
 
   const doStars = () =>
     run(async () => {
       const data = await importStars(username.trim());
       if (data.repos) onRepos(data.repos);
-      setResult(`${data.added} nieuw · ${data.existed} bestond al (van ${data.total} stars)`);
-      if (data.added) setNotice(`Stars: ${data.added} repo's geïmporteerd`);
+      setResult(t("{0} nieuw · {1} bestond al (van {2} stars)", [data.added, data.existed, data.total]));
+      if (data.added) setNotice(t("Stars: {0} repo's geïmporteerd", [data.added]));
     });
 
   const doExport = () => {
@@ -1605,7 +1597,7 @@ function AddModal({ hasToken, onClose, onRepos, repos, setNotice }) {
     link.download = "repo-notebook-export.json";
     link.click();
     URL.revokeObjectURL(url);
-    setResult("Geëxporteerd naar repo-notebook-export.json");
+    setResult(t("Geëxporteerd naar repo-notebook-export.json"));
   };
 
   const doImport = (event) => {
@@ -1618,26 +1610,26 @@ function AddModal({ hasToken, onClose, onRepos, repos, setNotice }) {
         try {
           parsed = JSON.parse(String(reader.result));
         } catch {
-          throw new Error("Geen geldig JSON-bestand.");
+          throw new Error(t("Geen geldig JSON-bestand."));
         }
         const list = Array.isArray(parsed) ? parsed : parsed.repos;
         const data = await importNotebook(Array.isArray(list) ? list : []);
         if (data.repos) onRepos(data.repos);
-        setResult(`${data.added} repo's geïmporteerd`);
-        if (data.added) setNotice(`Import: ${data.added} repo's toegevoegd`);
+        setResult(t("{0} repo's geïmporteerd", [data.added]));
+        if (data.added) setNotice(t("Import: {0} repo's toegevoegd", [data.added]));
       });
     reader.readAsText(file);
   };
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section aria-label="Repos toevoegen" className="add-modal" role="dialog">
+      <section aria-label={t("Repos toevoegen")} className="add-modal" role="dialog">
         <div className="modal-head">
-          <h2>Repos toevoegen</h2>
-          <button aria-label="Sluiten" className="icon" onClick={onClose}><X size={18} /></button>
+          <h2>{t("Repos toevoegen")}</h2>
+          <button aria-label={t("Sluiten")} className="icon" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="segment">
-          {[["bulk", "Bulk plakken"], ["stars", "GitHub Stars"], ["io", "Import / Export"]].map(([key, label]) => (
+          {[["bulk", t("Bulk plakken")], ["stars", "GitHub Stars"], ["io", "Import / Export"]].map(([key, label]) => (
             <button className={tab === key ? "active" : ""} key={key} onClick={() => { setTab(key); setResult(""); setError(""); }} type="button">
               {label}
             </button>
@@ -1646,36 +1638,33 @@ function AddModal({ hasToken, onClose, onRepos, repos, setNotice }) {
 
         {tab === "bulk" && (
           <div className="add-body">
-            <p className="add-hint">Plak een tekst (bv. een Insta-caption) — elke <code>github.com/owner/repo</code> erin wordt opgeslagen.</p>
-            <textarea onChange={(event) => setText(event.target.value)} placeholder="Plak hier links of hele tekst..." rows={6} value={text} />
+            <p className="add-hint">{t("Plak een tekst (bv. een Insta-caption) — elke")}{" "}<code>github.com/owner/repo</code>{" "}{t("erin wordt opgeslagen.")}</p>
+            <textarea onChange={(event) => setText(event.target.value)} placeholder={t("Plak hier links of hele tekst...")} rows={6} value={text} />
             <button className="primary" disabled={busy || !text.trim()} onClick={doBulk} type="button">
-              {busy ? <Loader2 className="spin" size={16} /> : <ClipboardList size={16} />} Alles opslaan
-            </button>
+              {busy ? <Loader2 className="spin" size={16} /> : <ClipboardList size={16} />}{" "}{t("Alles opslaan")}</button>
           </div>
         )}
 
         {tab === "stars" && (
           <div className="add-body">
-            <p className="add-hint">Importeer de publieke Stars van een GitHub-gebruiker (enkel nieuwe; bestaande blijven ongemoeid).{!hasToken && " Zonder GITHUB_TOKEN geldt een lagere rate-limit."}</p>
-            <input onChange={(event) => setUsername(event.target.value)} onKeyDown={(event) => event.key === "Enter" && username.trim() && doStars()} placeholder="GitHub-gebruikersnaam" value={username} />
+            <p className="add-hint">{t("Importeer de publieke Stars van een GitHub-gebruiker (enkel nieuwe; bestaande blijven ongemoeid).")}{!hasToken && t(" Zonder GITHUB_TOKEN geldt een lagere rate-limit.")}</p>
+            <input onChange={(event) => setUsername(event.target.value)} onKeyDown={(event) => event.key === "Enter" && username.trim() && doStars()} placeholder={t("GitHub-gebruikersnaam")} value={username} />
             <button className="primary" disabled={busy || !username.trim()} onClick={doStars} type="button">
-              {busy ? <Loader2 className="spin" size={16} /> : <Star size={16} />} Stars importeren
-            </button>
+              {busy ? <Loader2 className="spin" size={16} /> : <Star size={16} />}{" "}{t("Stars importeren")}</button>
           </div>
         )}
 
         {tab === "io" && (
           <div className="add-body io">
-            <button className="ghost" onClick={doExport} type="button"><Download size={16} /> Exporteer je lijst (.json)</button>
+            <button className="ghost" onClick={doExport} type="button"><Download size={16} />{" "}{t("Exporteer je lijst (.json)")}</button>
             <label className="ghost file-btn">
-              <Upload size={16} /> Importeer een lijst (.json)
-              <input accept="application/json" hidden onChange={doImport} type="file" />
+              <Upload size={16} />{" "}{t("Importeer een lijst (.json)")}<input accept="application/json" hidden onChange={doImport} type="file" />
             </label>
           </div>
         )}
 
-        {error && <div className="clone-error">{error}</div>}
-        {result && <div className="add-result"><CheckCircle2 size={16} /> {result}</div>}
+        {error && <div className="clone-error">{t(error)}</div>}
+        {result && <div className="add-result"><CheckCircle2 size={16} /> {t(result)}</div>}
       </section>
     </div>
   );
@@ -1699,7 +1688,7 @@ function VerdictPanel({ config, repo }) {
     try {
       const data = await repoVerdict(repo, refresh);
       if (data.available === false) {
-        setError("Geen AI beschikbaar. Start Ollama (lokaal, gratis) of zet OPENAI_API_KEY / ANTHROPIC_API_KEY.");
+        setError(t("Geen AI beschikbaar. Start Ollama (lokaal, gratis) of zet OPENAI_API_KEY / ANTHROPIC_API_KEY."));
       } else {
         setVerdict(data.verdict || "");
         setProvider(data.provider || "");
@@ -1717,22 +1706,20 @@ function VerdictPanel({ config, repo }) {
     <section className="panel verdict">
       <div className="panel-head">
         <h2>
-          <Sparkles size={16} /> Is dit de moeite?
-          {providerLabel && <span className="verdict-provider">via {providerLabel}</span>}
+          <Sparkles size={16} />{" "}{t("Is dit de moeite?")}{providerLabel && <span className="verdict-provider">via {providerLabel}</span>}
         </h2>
         <button disabled={busy} onClick={() => run(Boolean(verdict))} type="button">
           {busy ? <Loader2 className="spin" size={15} /> : <Sparkles size={15} />}
-          {verdict ? "Opnieuw" : "AI-oordeel"}
+          {verdict ? t("Opnieuw") : t("AI-oordeel")}
         </button>
       </div>
       <div className="verdict-body">
-        {error && <div className="verdict-error">{error}</div>}
+        {error && <div className="verdict-error">{t(error)}</div>}
         {verdict ? (
           <p className="verdict-text">{verdict}</p>
         ) : (
           !error && (
-            <p className="muted">
-              Kort AI-oordeel of dit de moeite is om te proberen{config?.ai ? "" : " — vereist een lokaal Ollama-model of een API-key"}.
+            <p className="muted">{t("Kort AI-oordeel of dit de moeite is om te proberen")}{config?.ai ? "" : t(" — vereist een lokaal Ollama-model of een API-key")}.
             </p>
           )
         )}
