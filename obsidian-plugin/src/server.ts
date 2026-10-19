@@ -7,6 +7,7 @@ import * as fs from "fs";
 import { spawn } from "child_process";
 import type { Graph, RepoRecord, RuntimeItem, Store } from "./core/types";
 import { readServerInfo } from "./core/store";
+import { t } from "./lang";
 
 export interface ServerConfig {
   ai: boolean;
@@ -67,7 +68,7 @@ export class ServerClient {
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const base = await this.discover();
-    if (!base) throw new Error("Repo Notebook draait niet. Start de app (commando: 'Start de Repo Notebook-app').");
+    if (!base) throw new Error(t("Repo Notebook draait niet. Start de app (commando: '{0}').", [t("Start de Repo Notebook-app")]));
     const res = await requestUrl({
       url: `${base}${path}`,
       method,
@@ -121,8 +122,8 @@ export class ServerClient {
 
   /** Launch the packaged desktop app (detached) and wait until its server answers. */
   async launchApp(exePath: string, timeoutMs = 25000): Promise<string> {
-    if (!exePath) throw new Error("Geen pad naar Repo Notebook.exe ingesteld (instellingen).");
-    if (!fs.existsSync(exePath)) throw new Error(`Repo Notebook.exe niet gevonden: ${exePath}`);
+    if (!exePath) throw new Error(t("Geen pad naar Repo Notebook.exe ingesteld (instellingen)."));
+    if (!fs.existsSync(exePath)) throw new Error(t("Repo Notebook.exe niet gevonden: {0}", [exePath]));
     const child = spawn(exePath, [], { detached: true, stdio: "ignore", windowsHide: false });
     child.on("error", () => {});
     child.unref();
@@ -132,6 +133,6 @@ export class ServerClient {
       const url = await this.discover(true);
       if (url) return url;
     }
-    throw new Error("De app is gestart maar de server antwoordt (nog) niet.");
+    throw new Error(t("De app is gestart maar de server antwoordt (nog) niet."));
   }
 }

@@ -17,7 +17,8 @@ const OPTIONS = {
   includeRelated: true,
   includeFiles: true,
   includeVerdict: true,
-  now: NOW
+  now: NOW,
+  lang: "nl" as const
 };
 
 test("yamlString quotes only when needed", () => {
@@ -100,7 +101,7 @@ test("normalizeReadme converts setext headings and truncates", () => {
   const out = normalizeReadme("Title\n=====\n\nSub\n---\n\ntext", { owner: "o", name: "n", branch: "dev", maxChars: 0 });
   assert.match(out, /^### Title/m);
   assert.match(out, /^#### Sub/m);
-  const short = normalizeReadme("a".repeat(100), { owner: "o", name: "n", branch: "dev", maxChars: 10 });
+  const short = normalizeReadme("a".repeat(100), { owner: "o", name: "n", branch: "dev", maxChars: 10, lang: "nl" });
   assert.match(short, /README ingekort/);
   assert.match(short, /blob\/dev\/README\.md/);
 });

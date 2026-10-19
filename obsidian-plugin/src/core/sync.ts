@@ -10,6 +10,7 @@ import {
   linkTo,
   noteHashFor,
   notePath,
+  removedCallout,
   renderBase,
   renderIndexNote,
   renderRepoNote,
@@ -17,6 +18,7 @@ import {
   type RenderOptions
 } from "./render";
 import { splitFrontmatter, splitFrontmatterEntries, frontmatterValue } from "./yaml";
+import type { Lang } from "./i18n";
 
 export interface VaultLike {
   exists(path: string): Promise<boolean>;
@@ -83,7 +85,7 @@ export const clusterFor = (graph: Graph): Map<string, GraphCluster | null> => {
 };
 
 /** Mark a note whose repo vanished from the app store (keeps the user's text). */
-export const markRemoved = (content: string): string => {
+export const markRemoved = (content: string, lang?: Lang): string => {
   const { frontmatter, body } = splitFrontmatter(content);
   if (frontmatter === null) return content;
   if ((frontmatterValue(frontmatter, "rn_removed") || "").toLowerCase() === "true") return content;
@@ -106,7 +108,7 @@ export const markRemoved = (content: string): string => {
   }
   if (!hadTags) lines.push("tags:", "  - repo/verwijderd");
   lines.push("rn_removed: true");
-  const warning = "> [!warning] Niet meer in Repo Notebook\n> Deze repo is uit de app verwijderd; de note blijft staan voor je eigen notities.\n\n";
+  const warning = `${removedCallout(lang).join("\n")}\n\n`;
   return `---\n${lines.join("\n")}\n---\n\n${warning}${body.replace(/^\n+/, "")}`;
 };
 
@@ -220,7 +222,7 @@ export const syncStoreToVault = async (store: Store, vault: VaultLike, options: 
       removedTotal++;
       if ((frontmatterValue(frontmatter, "rn_removed") || "").toLowerCase() === "true") continue;
       if (vault.isBusy?.(path)) continue;
-      const changed = await vault.update(path, (current) => markRemoved(current));
+      const changed = await vault.update(path, (current) => markRemoved(current, options.lang));
       if (changed) result.removedMarked++;
     }
   }
@@ -233,7 +235,7 @@ export const syncStoreToVault = async (store: Store, vault: VaultLike, options: 
   }
   if (options.writeBase) {
     const path = `${options.folder}/Repos.base`;
-    const base = renderBase(options.folder);
+    const base = renderBase(options.folder, options.lang);
     if (await vault.exists(path)) await vault.update(path, (current) => (current === base ? current : base));
     else await vault.create(path, base);
   }

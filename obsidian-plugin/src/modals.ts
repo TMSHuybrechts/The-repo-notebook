@@ -1,5 +1,6 @@
 import { App, Modal, Setting, TextAreaComponent } from "obsidian";
 import { extractRepoRefs, parseRepoRef } from "./core/util";
+import { t } from "./lang";
 
 /** Paste one URL / owner/name, or a whole text with many github.com links. */
 export class AddRepoModal extends Modal {
@@ -17,10 +18,10 @@ export class AddRepoModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.addClass("rn-modal");
-    contentEl.createEl("h3", { text: "Repo toevoegen aan Repo Notebook" });
+    contentEl.createEl("h3", { text: t("Repo toevoegen aan Repo Notebook") });
     contentEl.createEl("p", {
       cls: "rn-muted",
-      text: "Plak een GitHub-URL of owner/naam. Je mag ook een lap tekst plakken (bv. een post met meerdere links): elke github.com/owner/repo erin wordt bewaard."
+      text: t("Plak een GitHub-URL of owner/naam. Je mag ook een lap tekst plakken (bv. een post met meerdere links): elke github.com/owner/repo erin wordt bewaard.")
     });
     let area: TextAreaComponent | null = null;
     new Setting(contentEl).addTextArea((ta) => {
@@ -38,15 +39,15 @@ export class AddRepoModal extends Modal {
     const hint = contentEl.createEl("p", { cls: "rn-muted rn-hint" });
     const refresh = () => {
       const refs = this.parse();
-      hint.setText(refs.length ? `${refs.length} repo(s): ${refs.slice(0, 6).join(", ")}${refs.length > 6 ? " …" : ""}` : "Nog geen geldige repo gevonden.");
+      hint.setText(refs.length ? `${refs.length} repo(s): ${refs.slice(0, 6).join(", ")}${refs.length > 6 ? " …" : ""}` : t("Nog geen geldige repo gevonden."));
     };
     refresh();
     area!.inputEl.addEventListener("input", refresh);
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText("Annuleren").onClick(() => this.close()))
+      .addButton((b) => b.setButtonText(t("Annuleren")).onClick(() => this.close()))
       .addButton((b) =>
         b
-          .setButtonText("Toevoegen")
+          .setButtonText(t("Toevoegen"))
           .setCta()
           .onClick(() => void this.submit())
       );
@@ -89,18 +90,18 @@ export class TextModal extends Modal {
     contentEl.addClass("rn-modal");
     contentEl.createEl("h3", { text: this.title });
     const pre = contentEl.createEl("pre", { cls: "rn-log" });
-    pre.setText(this.text || "(leeg)");
+    pre.setText(this.text || t("(leeg)"));
     pre.scrollTop = pre.scrollHeight;
     const row = new Setting(contentEl);
     if (this.onRefresh) {
       row.addButton((b) =>
-        b.setButtonText("Ververs").onClick(async () => {
-          pre.setText((await this.onRefresh!()) || "(leeg)");
+        b.setButtonText(t("Ververs")).onClick(async () => {
+          pre.setText((await this.onRefresh!()) || t("(leeg)"));
           pre.scrollTop = pre.scrollHeight;
         })
       );
     }
-    row.addButton((b) => b.setButtonText("Sluiten").setCta().onClick(() => this.close()));
+    row.addButton((b) => b.setButtonText(t("Sluiten")).setCta().onClick(() => this.close()));
   }
 
   onClose(): void {
@@ -125,7 +126,7 @@ export class ConfirmModal extends Modal {
     contentEl.createEl("h3", { text: this.title });
     contentEl.createEl("p", { text: this.body });
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText("Annuleren").onClick(() => this.close()))
+      .addButton((b) => b.setButtonText(t("Annuleren")).onClick(() => this.close()))
       .addButton((b) =>
         b
           .setButtonText(this.confirmLabel)

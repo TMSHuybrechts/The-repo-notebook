@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RepoRecord, ServerInfo, Store } from "./types";
 import { ALLOWED_STATUS } from "./types";
+import { translate } from "./i18n";
 
 export const STORE_FILE = "notebook.json";
 export const SERVER_FILE = "server.json";
@@ -47,8 +48,8 @@ export const readStore = async (dataDir: string): Promise<Store> => {
       /* no usable backup */
     }
     const code = (error as NodeJS.ErrnoException)?.code;
-    if (code === "ENOENT") throw new Error(`notebook.json niet gevonden in ${dataDir}`);
-    throw new Error(`notebook.json is onleesbaar en er is geen bruikbare backup (${dataDir})`);
+    if (code === "ENOENT") throw new Error(translate("notebook.json niet gevonden in {0}", [dataDir], "nl"));
+    throw new Error(translate("notebook.json is onleesbaar en er is geen bruikbare backup ({0})", [dataDir], "nl"));
   }
 };
 
@@ -88,7 +89,7 @@ export const sanitizeMeta = (patch: MetaPatch): Partial<RepoRecord> => {
   if (typeof patch.category === "string") out.category = patch.category.trim().slice(0, 60);
   if (typeof patch.note === "string") out.note = patch.note.slice(0, 2000);
   if (typeof patch.status === "string") {
-    if (!ALLOWED_STATUS.has(patch.status)) throw new Error(`Ongeldige status: ${patch.status}`);
+    if (!ALLOWED_STATUS.has(patch.status)) throw new Error(translate("Ongeldige status: {0}", [patch.status], "nl"));
     out.status = patch.status;
   }
   return out;

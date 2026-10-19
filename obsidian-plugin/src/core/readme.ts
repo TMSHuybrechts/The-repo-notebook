@@ -3,6 +3,8 @@
 // links/images point at GitHub, and stray `#word` / `[[x]]` fragments don't
 // become accidental Obsidian tags or wikilinks.
 
+import { translate, type Lang } from "./i18n";
+
 export interface ReadmeOptions {
   owner: string;
   name: string;
@@ -10,6 +12,8 @@ export interface ReadmeOptions {
   maxChars: number;
   /** How many levels to push headings down (2 → `#` becomes `###`). */
   headingShift?: number;
+  /** Language of the truncation callout. Default English. */
+  lang?: Lang;
 }
 
 // A fence opener; returns its marker ("```" / "~~~~") or null. A backtick
@@ -116,7 +120,7 @@ export const normalizeReadme = (readme: string, options: ReadmeOptions): string 
 
   let result = out.join("\n").trim();
   if (truncated) {
-    result += `\n\n> [!note] README ingekort — volledige versie: ${blob}/README.md`;
+    result += `\n\n> [!note] ${translate("README ingekort — volledige versie: {0}", [`${blob}/README.md`], options.lang)}`;
   }
   return result;
 };

@@ -1,22 +1,25 @@
 // CLI: export the Repo Notebook store as a folder of notes (no Obsidian needed).
-//   node scripts/export.mjs <targetDir> [--data <dataDir>] [--folder "Repo Notebook"] [--no-readme]
+//   node scripts/export.mjs <targetDir> [--data <dataDir>] [--folder "Repo Notebook"] [--lang en|nl] [--no-readme]
 import * as path from "path";
 import { readStore, defaultDataDir } from "../src/core/store";
 import { syncStoreToVault } from "../src/core/sync";
 import { fsVault } from "../src/core/fs-vault";
+import { normalizeLang } from "../src/core/i18n";
 
 const args = process.argv.slice(2);
 const flag = (name: string): string | undefined => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const target = args.find((a) => !a.startsWith("--") && a !== flag("--data") && a !== flag("--folder"));
+const target = args.find((a) => !a.startsWith("--") && a !== flag("--data") && a !== flag("--folder") && a !== flag("--lang"));
 if (!target) {
-  console.error("Gebruik: node scripts/export.mjs <doelmap> [--data <datamap>] [--folder <naam>] [--no-readme]");
+  console.error("Gebruik: node scripts/export.mjs <doelmap> [--data <datamap>] [--folder <naam>] [--lang en|nl] [--no-readme]");
   process.exit(1);
 }
 const dataDir = flag("--data") || defaultDataDir();
 const folder = flag("--folder") || "Repo Notebook";
+// Language of the generated headings (identifiers never change). Default English.
+const lang = normalizeLang(flag("--lang") || "en");
 
 const main = async () => {
   const started = Date.now();
@@ -32,7 +35,8 @@ const main = async () => {
     writeIndex: true,
     writeBase: true,
     now: Date.now(),
-    serverOnline: false
+    serverOnline: false,
+    lang
   });
   console.log(
     `${result.total} repos uit ${dataDir}\n→ ${path.resolve(target, folder)}\n` +

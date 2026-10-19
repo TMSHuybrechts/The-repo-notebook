@@ -3,6 +3,7 @@
 
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import type { VaultLike } from "./core/sync";
+import { t } from "./lang";
 
 const BUSY_WINDOW_MS = 12000;
 
@@ -16,7 +17,7 @@ export const obsidianVault = (app: App): VaultLike => {
     exists: async (path) => fileAt(path) !== null,
     read: async (path) => {
       const file = fileAt(path);
-      if (!file) throw new Error(`Bestaat niet: ${path}`);
+      if (!file) throw new Error(t("Bestaat niet: {0}", [path]));
       return vault.read(file);
     },
     create: async (path, content) => {
@@ -24,7 +25,7 @@ export const obsidianVault = (app: App): VaultLike => {
     },
     update: async (path, fn) => {
       const file = fileAt(path);
-      if (!file) throw new Error(`Bestaat niet: ${path}`);
+      if (!file) throw new Error(t("Bestaat niet: {0}", [path]));
       // Cheap pre-check: Vault.process writes whatever the callback returns,
       // so only go through it when the content will actually change — that
       // keeps mtimes (and every other plugin's re-indexing) untouched for the

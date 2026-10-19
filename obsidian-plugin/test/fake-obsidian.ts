@@ -362,6 +362,11 @@ export class Setting {
     cb(b);
     return this;
   }
+  addDropdown(cb: (d: any) => void): this {
+    const d: any = { addOption: () => d, setValue: () => d, onChange: () => d };
+    cb(d);
+    return this;
+  }
   addExtraButton(cb: (b: any) => void): this {
     const b: any = { setIcon: () => b, setTooltip: () => b, onClick: () => b };
     cb(b);

@@ -6,6 +6,7 @@ import { STATUS_LABELS, STATUS_ORDER } from "./types";
 import { hashText, isoDate, repoHealth, repoLetter, safeSegment, shortNumber, slugify, sortRepos } from "./util";
 import { normalizeReadme } from "./readme";
 import { yamlEntries, type YamlValue } from "./yaml";
+import { translate, type Lang } from "./i18n";
 
 export const NOTES_START = "<!-- rn:notes -->";
 export const NOTES_END = "<!-- /rn:notes -->";
@@ -30,6 +31,8 @@ export interface RenderOptions {
   includeFiles: boolean;
   includeVerdict: boolean;
   now: number;
+  /** Language of generated headings/labels (identifiers never change). Default English. */
+  lang?: Lang;
 }
 
 export interface RelatedLink {
@@ -66,7 +69,14 @@ export const indexPath = (folder: string): string => `${folder}/${folder.split("
 
 const oneLine = (text: string | undefined): string => String(text || "").replace(/\s+/g, " ").trim();
 
-const statusLabel = (status: string | undefined): string => (status && STATUS_LABELS[status]) || "";
+const statusLabel = (status: string | undefined, lang?: Lang): string =>
+  status && STATUS_LABELS[status] ? translate(STATUS_LABELS[status], [], lang) : "";
+
+/** Callout lines written on notes whose repo was removed from the app. */
+export const removedCallout = (lang?: Lang): [string, string] => [
+  `> [!warning] ${translate("Niet meer in Repo Notebook", [], lang)}`,
+  `> ${translate("Deze repo is uit de app verwijderd; de note blijft staan voor je eigen notities.", [], lang)}`
+];
 
 export const repoTags = (repo: RepoRecord, cluster: GraphCluster | null, removed = false): string[] => {
   const tags = [BASE_TAG];
@@ -90,20 +100,23 @@ const calloutLines = (text: string): string =>
     .map((line) => `> ${line}`)
     .join("\n");
 
-const describeEdge = (edge: GraphEdge): string => {
+const describeEdge = (edge: GraphEdge, lang?: Lang): string => {
+  const tr = (m: string, v: Array<string | number> = []) => translate(m, v, lang);
   const parts: string[] = [];
   if (edge.sharedTopics?.length) parts.push(`topics: ${edge.sharedTopics.slice(0, 4).join(", ")}`);
-  if (edge.sharedTerms?.length) parts.push(`woorden: ${edge.sharedTerms.slice(0, 4).join(", ")}`);
-  if (edge.sameCategory) parts.push("zelfde categorie");
-  if (edge.sameOwner) parts.push("zelfde maker");
-  if (edge.sameLanguage && !edge.sharedTopics?.length && !edge.sharedTerms?.length) parts.push("zelfde taal");
-  if (edge.hidden) parts.push("_verborgen link_");
+  if (edge.sharedTerms?.length) parts.push(tr("woorden: {0}", [edge.sharedTerms.slice(0, 4).join(", ")]));
+  if (edge.sameCategory) parts.push(tr("zelfde categorie"));
+  if (edge.sameOwner) parts.push(tr("zelfde maker"));
+  if (edge.sameLanguage && !edge.sharedTopics?.length && !edge.sharedTerms?.length) parts.push(tr("zelfde taal"));
+  if (edge.hidden) parts.push(`_${tr("verborgen link")}_`);
   parts.push(`score ${edge.score.toFixed(2)}`);
   return parts.join(" · ");
 };
 
 export const renderRepoNote = (input: NoteInput, options: RenderOptions): string => {
   const { repo, related, cluster } = input;
+  const lang = options.lang;
+  const tr = (m: string, v: Array<string | number> = []) => translate(m, v, lang);
   const health = repoHealth(repo, options.now);
   const cloned = Boolean(repo.cloneStatus || repo.localPath);
   const fullName = repo.fullName || `${repo.owner}/${repo.name}`;
@@ -156,14 +169,14 @@ export const renderRepoNote = (input: NoteInput, options: RenderOptions): string
   if (repo.language) facts.push(repo.language);
   if (repo.license) facts.push(repo.license);
   if (repo.pushedAt) facts.push(`push ${isoDate(repo.pushedAt)}`);
-  if (health) facts.push(health.label);
-  if (statusLabel(repo.status as string)) facts.push(`**${statusLabel(repo.status as string)}**`);
+  if (health) facts.push(tr(health.label));
+  if (statusLabel(repo.status as string, lang)) facts.push(`**${statusLabel(repo.status as string, lang)}**`);
   if (repo.category) facts.push(`📂 ${repo.category}`);
-  if (cloned) facts.push("💾 gekloond");
+  if (cloned) facts.push(`💾 ${tr("gekloond")}`);
 
   const body: string[] = [];
   if (input.removed) {
-    body.push("> [!warning] Niet meer in Repo Notebook", "> Deze repo is uit de app verwijderd; de note blijft staan voor je eigen notities.", "");
+    body.push(...removedCallout(lang), "");
   }
   body.push(`> [!abstract] ${fullName}`);
   if (repo.description) body.push(`> ${oneLine(repo.description)}`, ">");
@@ -171,27 +184,27 @@ export const renderRepoNote = (input: NoteInput, options: RenderOptions): string
   if (repo.topics?.length) body.push(">", `> ${repo.topics.map((t) => `\`${t}\``).join(" ")}`);
   body.push("");
 
-  body.push("## Notities", NOTES_START, input.notesRegion.replace(/^\n+|\n+$/g, ""), NOTES_END, "");
+  body.push(`## ${tr("Notities")}`, NOTES_START, input.notesRegion.replace(/^\n+|\n+$/g, ""), NOTES_END, "");
   if (input.conflictNote) {
-    body.push("> [!warning] Notitie in de Repo Notebook-app verschilt van je vault-notitie", calloutLines(input.conflictNote), "");
+    body.push(`> [!warning] ${tr("Notitie in de Repo Notebook-app verschilt van je vault-notitie")}`, calloutLines(input.conflictNote), "");
   }
 
   if (options.includeVerdict && repo.aiVerdict) {
     const meta = [repo.aiProvider, isoDate(repo.aiVerdictAt)].filter(Boolean).join(" · ");
-    body.push(`## AI-oordeel`, `> [!tip] Is dit de moeite?${meta ? ` (${meta})` : ""}`, calloutLines(repo.aiVerdict), "");
+    body.push(`## ${tr("AI-oordeel")}`, `> [!tip] ${tr("Is dit de moeite?")}${meta ? ` (${meta})` : ""}`, calloutLines(repo.aiVerdict), "");
   }
 
   if (options.includeRelated && related.length) {
-    body.push("## Verwante repos");
+    body.push(`## ${tr("Verwante repos")}`);
     for (const { repo: other, edge } of related) {
-      body.push(`- ${linkTo(options.folder, other)} — ${describeEdge(edge)}`);
+      body.push(`- ${linkTo(options.folder, other)} — ${describeEdge(edge, lang)}`);
     }
     body.push("");
   }
 
   if (options.includeFiles && repo.files?.length) {
     const names = repo.files.map((f) => `\`${f.type === "dir" ? `${f.name}/` : f.name}\``);
-    body.push(`> [!example]- Bestanden (${repo.files.length})`, `> ${names.join(" · ")}`, "");
+    body.push(`> [!example]- ${tr("Bestanden ({0})", [repo.files.length])}`, `> ${names.join(" · ")}`, "");
   }
 
   if (options.includeReadme && repo.readme) {
@@ -199,7 +212,8 @@ export const renderRepoNote = (input: NoteInput, options: RenderOptions): string
       owner: repo.owner,
       name: repo.name,
       branch: repo.defaultBranch || "main",
-      maxChars: options.readmeMaxChars
+      maxChars: options.readmeMaxChars,
+      lang
     });
     body.push("## README", README_START, readme, README_END, "");
   }
@@ -218,6 +232,8 @@ export interface IndexInput {
 
 export const renderIndexNote = (input: IndexInput, options: RenderOptions): string => {
   const { repos, graph } = input;
+  const lang = options.lang;
+  const tr = (m: string, v: Array<string | number> = []) => translate(m, v, lang);
   const sorted = sortRepos(repos);
   const byId = new Map(repos.map((r) => [r.id, r]));
   const cloned = repos.filter((r) => r.cloneStatus || r.localPath).length;
@@ -235,20 +251,20 @@ export const renderIndexNote = (input: IndexInput, options: RenderOptions): stri
     "---",
     "",
     `> [!abstract] Repo Notebook`,
-    `> **${repos.length}** repos · **${cloned}** gekloond${graph ? ` · **${graph.edges.length}** links (${hidden} verborgen) · **${graph.clusters.length}** clusters` : ""}`,
-    `> ${statusCounts.length ? statusCounts.map(([key, n]) => `${STATUS_LABELS[key]} ${n}`).join(" · ") : "nog geen statussen"}`,
-    `> Gesynct ${new Date(options.now).toISOString().slice(0, 16).replace("T", " ")} · app ${input.serverOnline ? "online" : "offline"}${input.removedCount ? ` · ${input.removedCount} verwijderde notes bewaard` : ""}`,
+    `> ${tr("**{0}** repos · **{1}** gekloond", [repos.length, cloned])}${graph ? ` · ${tr("**{0}** links ({1} verborgen)", [graph.edges.length, hidden])} · **${graph.clusters.length}** clusters` : ""}`,
+    `> ${statusCounts.length ? statusCounts.map(([key, n]) => `${statusLabel(key, lang)} ${n}`).join(" · ") : tr("nog geen statussen")}`,
+    `> ${tr("Gesynct {0} · app {1}", [new Date(options.now).toISOString().slice(0, 16).replace("T", " "), input.serverOnline ? "online" : "offline"])}${input.removedCount ? ` · ${tr("{0} verwijderde notes bewaard", [input.removedCount])}` : ""}`,
     ""
   ];
 
   const entry = (repo: RepoRecord): string => {
-    const bits = [repo.language, repo.stars ? `⭐ ${shortNumber(repo.stars)}` : "", statusLabel(repo.status as string)].filter(Boolean);
+    const bits = [repo.language, repo.stars ? `⭐ ${shortNumber(repo.stars)}` : "", statusLabel(repo.status as string, lang)].filter(Boolean);
     const desc = oneLine(repo.description);
     return `- ${linkTo(options.folder, repo)}${bits.length ? ` (${bits.join(" · ")})` : ""}${desc ? ` — ${desc.length > 110 ? `${desc.slice(0, 107)}…` : desc}` : ""}`;
   };
 
   if (graph && graph.clusters.length) {
-    lines.push("## Clusters (kennisgraaf)", "");
+    lines.push(`## ${tr("Clusters (kennisgraaf)")}`, "");
     const members = new Map<number, RepoRecord[]>();
     for (const node of graph.nodes) {
       const repo = byId.get(node.id);
@@ -265,9 +281,9 @@ export const renderIndexNote = (input: IndexInput, options: RenderOptions): stri
   }
 
   if (statusCounts.length) {
-    lines.push("## Per status", "");
+    lines.push(`## ${tr("Per status")}`, "");
     for (const [key] of statusCounts) {
-      lines.push(`### ${STATUS_LABELS[key]}`);
+      lines.push(`### ${statusLabel(key, lang)}`);
       for (const repo of sorted.filter((r) => r.status === key)) lines.push(entry(repo));
       lines.push("");
     }
@@ -288,8 +304,9 @@ export const renderIndexNote = (input: IndexInput, options: RenderOptions): stri
 };
 
 /** The Bases file: a native table over all repo notes (Obsidian 1.9+). */
-export const renderBase = (folder: string): string =>
-  [
+export const renderBase = (folder: string, lang?: Lang): string => {
+  const tr = (m: string) => translate(m, [], lang);
+  return [
     "filters:",
     "  and:",
     `    - file.hasTag("${BASE_TAG}")`,
@@ -299,26 +316,26 @@ export const renderBase = (folder: string): string =>
     "  note.repo:",
     "    displayName: Repo",
     "  note.language:",
-    "    displayName: Taal",
+    `    displayName: ${tr("Taal")}`,
     "  note.stars:",
     "    displayName: Stars",
     "  note.status:",
     "    displayName: Status",
     "  note.category:",
-    "    displayName: Categorie",
+    `    displayName: ${tr("Categorie")}`,
     "  note.cluster:",
     "    displayName: Cluster",
     "  note.health:",
-    "    displayName: Gezondheid",
+    `    displayName: ${tr("Gezondheid")}`,
     "  note.pushed_at:",
-    "    displayName: Laatste push",
+    `    displayName: ${tr("Laatste push")}`,
     "  note.cloned:",
-    "    displayName: Gekloond",
+    `    displayName: ${tr("Gekloond")}`,
     "  note.description:",
-    "    displayName: Omschrijving",
+    `    displayName: ${tr("Omschrijving")}`,
     "views:",
     "  - type: table",
-    "    name: Alle repos",
+    `    name: ${tr("Alle repos")}`,
     "    order:",
     "      - file.name",
     "      - note.owner",
@@ -334,7 +351,7 @@ export const renderBase = (folder: string): string =>
     "      - property: note.stars",
     "        direction: DESC",
     "  - type: table",
-    "    name: Te proberen",
+    `    name: ${tr("Te proberen")}`,
     "    filters:",
     "      and:",
     `        - 'status == "todo"'`,
@@ -344,7 +361,7 @@ export const renderBase = (folder: string): string =>
     "      - note.stars",
     "      - note.description",
     "  - type: table",
-    "    name: Gekloond",
+    `    name: ${tr("Gekloond")}`,
     "    filters:",
     "      and:",
     "        - cloned == true",
@@ -354,7 +371,7 @@ export const renderBase = (folder: string): string =>
     "      - note.status",
     "      - note.local_path",
     "  - type: table",
-    "    name: Per cluster",
+    `    name: ${tr("Per cluster")}`,
     "    groupBy:",
     "      property: note.cluster",
     "      direction: ASC",
@@ -364,7 +381,7 @@ export const renderBase = (folder: string): string =>
     "      - note.stars",
     "      - note.description",
     "  - type: cards",
-    "    name: Kaarten",
+    `    name: ${tr("Kaarten")}`,
     "    order:",
     "      - file.name",
     "      - note.description",
@@ -372,3 +389,4 @@ export const renderBase = (folder: string): string =>
     "      - note.stars",
     ""
   ].join("\n");
+};

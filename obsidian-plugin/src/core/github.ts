@@ -3,6 +3,7 @@
 // app isn't running so "add repo" still works straight from Obsidian.
 
 import type { RepoFile, RepoRecord } from "./types";
+import { translate } from "./i18n";
 
 export type JsonFetcher = (url: string, headers: Record<string, string>) => Promise<{ status: number; json: unknown; text: string }>;
 
@@ -94,9 +95,9 @@ export const fetchGitHubRepo = async (
   const headers = githubHeaders(options.token);
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const metaRes = await fetchJson(base, headers);
-  if (metaRes.status === 404) throw new Error(`GitHub kent ${owner}/${name} niet (404).`);
-  if (metaRes.status === 403 || metaRes.status === 429) throw new Error("GitHub rate limit bereikt — zet GITHUB_TOKEN of wacht even.");
-  if (metaRes.status >= 400) throw new Error(`GitHub gaf ${metaRes.status}: ${metaRes.text.slice(0, 140)}`);
+  if (metaRes.status === 404) throw new Error(translate("GitHub kent {0} niet (404).", [`${owner}/${name}`], "nl"));
+  if (metaRes.status === 403 || metaRes.status === 429) throw new Error(translate("GitHub rate limit bereikt — zet GITHUB_TOKEN of wacht even.", [], "nl"));
+  if (metaRes.status >= 400) throw new Error(translate("GitHub gaf {0}: {1}", [metaRes.status, metaRes.text.slice(0, 140)], "nl"));
   const meta = metaRes.json as GitHubRepoMeta;
   const branch = meta.default_branch || "main";
 

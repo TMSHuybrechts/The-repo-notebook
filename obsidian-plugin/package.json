@@ -1,6 +1,6 @@
 {
   "name": "repo-notebook-obsidian",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Repo Notebook inside Obsidian: every saved GitHub repo becomes a note, the knowledge-graph links become wikilinks, and clone/install/start stay one command away.",
   "private": true,
   "type": "module",

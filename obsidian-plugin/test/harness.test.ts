@@ -45,7 +45,7 @@ test("plugin lifecycle: load → sync → panel → open → push → status →
 
   const app = new App(vaultDir);
   const plugin = new RepoNotebookPlugin(app as any);
-  plugin.data = { dataDir, folder: "Repo Notebook", serverUrl: "http://127.0.0.1:1", appExePath: "", watchStore: false };
+  plugin.data = { dataDir, folder: "Repo Notebook", serverUrl: "http://127.0.0.1:1", appExePath: "", watchStore: false, language: "nl" };
   let view: any = null;
   try {
   await plugin.onload();

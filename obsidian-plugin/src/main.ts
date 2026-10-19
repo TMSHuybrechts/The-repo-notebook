@@ -13,6 +13,7 @@ import { ServerClient } from "./server";
 import { obsidianVault } from "./vault-adapter";
 import { AddRepoModal, ConfirmModal, TextModal } from "./modals";
 import { ShelfView, VIEW_TYPE } from "./view";
+import { errorText, getLanguage, resolveLanguage, setLanguage, t } from "./lang";
 
 type ActionKind = "refresh" | "clone" | "install" | "start" | "stop" | "log" | "pull" | "open-local" | "remove";
 
@@ -99,6 +100,15 @@ export default class RepoNotebookPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) || {}) };
+    if (!["auto", "en", "nl"].includes(this.settings.language)) this.settings.language = "auto";
+    setLanguage(resolveLanguage(this.settings.language));
+  }
+
+  /** Re-resolve the UI language after the setting changed and refresh what is on screen. */
+  applyLanguage(): void {
+    setLanguage(resolveLanguage(this.settings.language));
+    this.renderStatusBar();
+    this.events.trigger("language");
   }
 
   async saveSettings(): Promise<void> {
@@ -111,20 +121,20 @@ export default class RepoNotebookPlugin extends Plugin {
 
   // ------------------------------------------------------------ commands
   private registerCommands(): void {
-    this.addCommand({ id: "open-shelf", name: "Open het zijpaneel (plank)", callback: () => void this.activateView() });
-    this.addCommand({ id: "sync-all", name: "Synchroniseer alle repos naar de vault", callback: () => void this.syncAll({ reason: "command" }) });
-    this.addCommand({ id: "add-repo", name: "Repo toevoegen (URL of tekst met links)", callback: () => this.openAddRepo() });
+    this.addCommand({ id: "open-shelf", name: t("Open het zijpaneel (plank)"), callback: () => void this.activateView() });
+    this.addCommand({ id: "sync-all", name: t("Synchroniseer alle repos naar de vault"), callback: () => void this.syncAll({ reason: "command" }) });
+    this.addCommand({ id: "add-repo", name: t("Repo toevoegen (URL of tekst met links)"), callback: () => this.openAddRepo() });
     this.addCommand({
       id: "add-repo-from-clipboard",
-      name: "Repo toevoegen vanaf klembord",
+      name: t("Repo toevoegen vanaf klembord"),
       callback: async () => {
         const text = await navigator.clipboard.readText().catch(() => "");
         this.openAddRepo(text);
       }
     });
-    this.addCommand({ id: "open-app", name: "Open de Repo Notebook-app", callback: () => void this.openApp(this.currentRepo() || undefined) });
-    this.addCommand({ id: "start-app", name: "Start de Repo Notebook-app", callback: () => void this.startApp() });
-    this.addCommand({ id: "open-index", name: "Open de indexnote", callback: () => void this.openIndex() });
+    this.addCommand({ id: "open-app", name: t("Open de Repo Notebook-app"), callback: () => void this.openApp(this.currentRepo() || undefined) });
+    this.addCommand({ id: "start-app", name: t("Start de Repo Notebook-app"), callback: () => void this.startApp() });
+    this.addCommand({ id: "open-index", name: t("Open de indexnote"), callback: () => void this.openIndex() });
 
     const repoCommand = (id: string, name: string, run: (repo: RepoRecord) => void | Promise<void>) =>
       this.addCommand({
@@ -137,22 +147,22 @@ export default class RepoNotebookPlugin extends Plugin {
           return true;
         }
       });
-    repoCommand("open-github", "Huidige repo: open op GitHub", (repo) => {
+    repoCommand("open-github", t("Huidige repo: open op GitHub"), (repo) => {
       window.open(repo.htmlUrl || `https://github.com/${repo.fullName}`);
     });
-    repoCommand("refresh-current", "Huidige repo: ververs van GitHub", (repo) => this.action("refresh", repo));
-    repoCommand("clone-current", "Huidige repo: kloon", (repo) => this.action("clone", repo));
-    repoCommand("install-current", "Huidige repo: installeer", (repo) => this.action("install", repo));
-    repoCommand("start-current", "Huidige repo: start", (repo) => this.action("start", repo));
-    repoCommand("stop-current", "Huidige repo: stop", (repo) => this.action("stop", repo));
-    repoCommand("log-current", "Huidige repo: toon log", (repo) => this.action("log", repo));
-    repoCommand("pull-current", "Huidige repo: git pull", (repo) => this.action("pull", repo));
-    repoCommand("open-local-current", "Huidige repo: open lokale map", (repo) => this.action("open-local", repo));
-    repoCommand("push-current", "Huidige repo: stuur status/categorie/notities naar de app", (repo) => this.pushNoteMeta(repo, true));
-    repoCommand("resync-current", "Huidige repo: hersynchroniseer deze note", async (repo) => {
+    repoCommand("refresh-current", t("Huidige repo: ververs van GitHub"), (repo) => this.action("refresh", repo));
+    repoCommand("clone-current", t("Huidige repo: kloon"), (repo) => this.action("clone", repo));
+    repoCommand("install-current", t("Huidige repo: installeer"), (repo) => this.action("install", repo));
+    repoCommand("start-current", t("Huidige repo: start"), (repo) => this.action("start", repo));
+    repoCommand("stop-current", t("Huidige repo: stop"), (repo) => this.action("stop", repo));
+    repoCommand("log-current", t("Huidige repo: toon log"), (repo) => this.action("log", repo));
+    repoCommand("pull-current", t("Huidige repo: git pull"), (repo) => this.action("pull", repo));
+    repoCommand("open-local-current", t("Huidige repo: open lokale map"), (repo) => this.action("open-local", repo));
+    repoCommand("push-current", t("Huidige repo: stuur status/categorie/notities naar de app"), (repo) => this.pushNoteMeta(repo, true));
+    repoCommand("resync-current", t("Huidige repo: hersynchroniseer deze note"), async (repo) => {
       await this.syncAll({ reason: "command", onlyIds: new Set([repo.id]) });
     });
-    repoCommand("remove-current", "Huidige repo: verwijder uit Repo Notebook", (repo) => this.action("remove", repo));
+    repoCommand("remove-current", t("Huidige repo: verwijder uit Repo Notebook"), (repo) => this.action("remove", repo));
   }
 
   // ------------------------------------------------------------ store
@@ -172,10 +182,10 @@ export default class RepoNotebookPlugin extends Plugin {
           this.store = await this.server.notebook();
           this.storeError = "";
         } else {
-          this.storeError = (error as Error).message;
+          this.storeError = errorText(error);
         }
       } catch (inner) {
-        this.storeError = `${(error as Error).message} · ${(inner as Error).message}`;
+        this.storeError = `${errorText(error)} · ${errorText(inner)}`;
       }
     }
     this.events.trigger("store");
@@ -212,6 +222,7 @@ export default class RepoNotebookPlugin extends Plugin {
       writeIndex: s.writeIndex,
       writeBase: s.writeBase,
       now: Date.now(),
+      lang: getLanguage(),
       serverOnline: this.serverOnline,
       pushedNoteHashes: this.pushedNoteHashes,
       onlyIds: extra.onlyIds
@@ -231,7 +242,7 @@ export default class RepoNotebookPlugin extends Plugin {
         const mtimeAtRead = await storeMtime(this.dataDir);
         const store = await this.reloadStore();
         if (!store) {
-          new Notice(`Repo Notebook: ${this.storeError || "geen data gevonden"}`, 7000);
+          new Notice(`Repo Notebook: ${this.storeError || t("geen data gevonden")}`, 7000);
           return null;
         }
         const result = await syncStoreToVault(store, obsidianVault(this.app), this.syncOptions({ onlyIds: opts.onlyIds }));
@@ -241,12 +252,12 @@ export default class RepoNotebookPlugin extends Plugin {
           this.settings.lastSyncedMtime = this.lastSeenMtime;
           await this.saveSettings();
         }
-        const parts = [`${result.created} nieuw`, `${result.updated} bijgewerkt`, `${result.unchanged} ongewijzigd`];
-        if (result.deferred.length) parts.push(`${result.deferred.length} uitgesteld (in bewerking)`);
-        if (result.skippedNoMarkers.length) parts.push(`${result.skippedNoMarkers.length} overgeslagen (markers weg)`);
-        if (result.conflicts.length) parts.push(`${result.conflicts.length} notitie-conflict`);
-        if (result.removedMarked) parts.push(`${result.removedMarked} als verwijderd gemarkeerd`);
-        this.lastSyncSummary = `sync ${new Date().toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}`;
+        const parts = [t("{0} nieuw", [result.created]), t("{0} bijgewerkt", [result.updated]), t("{0} ongewijzigd", [result.unchanged])];
+        if (result.deferred.length) parts.push(t("{0} uitgesteld (in bewerking)", [result.deferred.length]));
+        if (result.skippedNoMarkers.length) parts.push(t("{0} overgeslagen (markers weg)", [result.skippedNoMarkers.length]));
+        if (result.conflicts.length) parts.push(t("{0} notitie-conflict", [result.conflicts.length]));
+        if (result.removedMarked) parts.push(t("{0} als verwijderd gemarkeerd", [result.removedMarked]));
+        this.lastSyncSummary = `sync ${new Date().toLocaleTimeString(getLanguage() === "nl" ? "nl-BE" : "en-GB", { hour: "2-digit", minute: "2-digit" })}`;
         const changed = result.created + result.updated + result.removedMarked > 0;
         if (!opts.quiet || changed || result.conflicts.length || result.skippedNoMarkers.length) {
           new Notice(`Repo Notebook · ${result.total} repos · ${parts.join(" · ")} (${result.durationMs} ms)`, changed ? 6000 : 3500);
@@ -267,7 +278,7 @@ export default class RepoNotebookPlugin extends Plugin {
         return result;
       } catch (error) {
         console.error("[repo-notebook] sync failed", error);
-        new Notice(`Repo Notebook sync mislukt: ${(error as Error).message}`, 8000);
+        new Notice(t("Repo Notebook sync mislukt: {0}", [errorText(error)]), 8000);
         return null;
       } finally {
         this.syncing = null;
@@ -353,32 +364,32 @@ export default class RepoNotebookPlugin extends Plugin {
   async testConnection(): Promise<string> {
     const lines: string[] = [];
     const dir = this.dataDir;
-    lines.push((await dataDirExists(dir)) ? `✓ notebook.json gevonden in ${dir}` : `✗ geen notebook.json in ${dir}`);
+    lines.push((await dataDirExists(dir)) ? t("✓ notebook.json gevonden in {0}", [dir]) : t("✗ geen notebook.json in {0}", [dir]));
     const url = await this.server.discover(true);
-    lines.push(url ? `✓ app online op ${url}` : "○ app offline (lezen werkt, acties niet)");
+    lines.push(url ? t("✓ app online op {0}", [url]) : t("○ app offline (lezen werkt, acties niet)"));
     try {
       const store = await readStore(dir);
       lines.push(`✓ ${store.repos.length} repos`);
     } catch (error) {
-      lines.push(`✗ ${(error as Error).message}`);
+      lines.push(`✗ ${errorText(error)}`);
     }
     return lines.join("\n");
   }
 
   async startApp(): Promise<void> {
     if (await this.server.isOnline(true)) {
-      new Notice("Repo Notebook draait al.");
+      new Notice(t("Repo Notebook draait al."));
       return;
     }
-    const notice = new Notice("Repo Notebook starten…", 0);
+    const notice = new Notice(t("Repo Notebook starten…"), 0);
     try {
       const url = await this.server.launchApp(this.settings.appExePath);
       notice.hide();
-      new Notice(`Repo Notebook online op ${url}`);
+      new Notice(t("Repo Notebook online op {0}", [url]));
       await this.probeServer();
     } catch (error) {
       notice.hide();
-      new Notice(`Starten mislukt: ${(error as Error).message}`, 8000);
+      new Notice(t("Starten mislukt: {0}", [errorText(error)]), 8000);
     }
   }
 
@@ -413,7 +424,7 @@ export default class RepoNotebookPlugin extends Plugin {
       file = this.app.vault.getAbstractFileByPath(path);
     }
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
-    else new Notice(`Note voor ${repo.fullName} kon niet gemaakt worden.`);
+    else new Notice(t("Note voor {0} kon niet gemaakt worden.", [repo.fullName]));
   }
 
   async openIndex(): Promise<void> {
@@ -446,7 +457,7 @@ export default class RepoNotebookPlugin extends Plugin {
 
   async addRepos(refs: string[]): Promise<void> {
     if (!refs.length) return;
-    const notice = new Notice(`${refs.length === 1 ? refs[0] : `${refs.length} repos`} toevoegen…`, 0);
+    const notice = new Notice(t("{0} toevoegen…", [refs.length === 1 ? refs[0] : `${refs.length} repos`]), 0);
     const added: string[] = [];
     const existed: string[] = [];
     const failed: string[] = [];
@@ -456,7 +467,7 @@ export default class RepoNotebookPlugin extends Plugin {
         const result = await this.server.bulkSave(refs.map((r) => `https://github.com/${r}`).join("\n"));
         added.push(...result.added);
         existed.push(...result.existed);
-        failed.push(...result.failed.map((f) => `${f.slug}: ${f.error}`));
+        failed.push(...result.failed.map((f) => `${f.slug}: ${errorText(f.error)}`));
       } else {
         for (const ref of refs) {
           const parsed = parseRepoRef(ref);
@@ -476,7 +487,7 @@ export default class RepoNotebookPlugin extends Plugin {
               (result.existed ? existed : added).push(result.repo.fullName);
             }
           } catch (error) {
-            failed.push(`${ref}: ${(error as Error).message}`);
+            failed.push(`${ref}: ${errorText(error)}`);
           }
         }
       }
@@ -487,13 +498,13 @@ export default class RepoNotebookPlugin extends Plugin {
     // Full sync: a new repo shifts the graph (IDF, clusters) of its neighbours too.
     if (ids.size) await this.syncAll({ reason: "add", quiet: true });
     const summary = [
-      added.length ? `toegevoegd: ${added.join(", ")}` : "",
-      existed.length ? `stond er al (bijgewerkt): ${existed.join(", ")}` : "",
-      failed.length ? `mislukt: ${failed.join("; ")}` : ""
+      added.length ? t("toegevoegd: {0}", [added.join(", ")]) : "",
+      existed.length ? t("stond er al (bijgewerkt): {0}", [existed.join(", ")]) : "",
+      failed.length ? t("mislukt: {0}", [failed.join("; ")]) : ""
     ]
       .filter(Boolean)
       .join(" · ");
-    new Notice(`Repo Notebook — ${summary || "niets gedaan"}`, failed.length ? 9000 : 5000);
+    new Notice(`Repo Notebook — ${summary || t("niets gedaan")}`, failed.length ? 9000 : 5000);
     if (this.settings.openNoteAfterAdd && ids.size === 1) {
       const repo = this.findRepoById([...ids][0]);
       if (repo) await this.openRepoNote(repo);
@@ -516,10 +527,10 @@ export default class RepoNotebookPlugin extends Plugin {
   async setStatus(repo: RepoRecord, status: string): Promise<void> {
     try {
       await this.applyMeta(repo, { status });
-      new Notice(`${repo.fullName}: ${status ? STATUS_LABELS[status] : "status gewist"}`);
+      new Notice(`${repo.fullName}: ${status ? t(STATUS_LABELS[status]) : t("status gewist")}`);
       await this.syncAll({ reason: "status", quiet: true });
     } catch (error) {
-      new Notice(`Status zetten mislukt: ${(error as Error).message}`, 6000);
+      new Notice(t("Status zetten mislukt: {0}", [errorText(error)]), 6000);
     }
   }
 
@@ -528,9 +539,9 @@ export default class RepoNotebookPlugin extends Plugin {
     if (kind === "remove") {
       new ConfirmModal(
         this.app,
-        "Verwijderen uit Repo Notebook",
-        `${repo.fullName} verdwijnt uit de app. De note in je vault blijft staan (gemarkeerd als verwijderd).`,
-        "Verwijder",
+        t("Verwijderen uit Repo Notebook"),
+        t("{0} verdwijnt uit de app. De note in je vault blijft staan (gemarkeerd als verwijderd).", [repo.fullName]),
+        t("Verwijder"),
         () => this.runAction(kind, repo)
       ).open();
       return;
@@ -540,15 +551,15 @@ export default class RepoNotebookPlugin extends Plugin {
 
   private async runAction(kind: ActionKind, repo: RepoRecord): Promise<void> {
     const labels: Record<ActionKind, string> = {
-      refresh: "verversen",
-      clone: "klonen",
-      install: "installeren",
-      start: "starten",
-      stop: "stoppen",
-      log: "log ophalen",
+      refresh: t("verversen"),
+      clone: t("klonen"),
+      install: t("installeren"),
+      start: t("starten"),
+      stop: t("stoppen"),
+      log: t("log ophalen"),
       pull: "git pull",
-      "open-local": "map openen",
-      remove: "verwijderen"
+      "open-local": t("map openen"),
+      remove: t("verwijderen")
     };
     if (!(await this.server.isOnline())) {
       if (kind === "remove") {
@@ -556,14 +567,14 @@ export default class RepoNotebookPlugin extends Plugin {
         try {
           const store = await readStore(this.dataDir);
           await writeStore(this.dataDir, { repos: store.repos.filter((r) => r.id !== repo.id) });
-          new Notice(`${repo.fullName} verwijderd uit Repo Notebook.`);
+          new Notice(t("{0} verwijderd uit Repo Notebook.", [repo.fullName]));
           await this.syncAll({ reason: "remove", quiet: true });
         } catch (error) {
-          new Notice(`${repo.fullName}: verwijderen mislukt — ${(error as Error).message}`, 8000);
+          new Notice(t("{0}: verwijderen mislukt — {1}", [repo.fullName, errorText(error)]), 8000);
         }
         return;
       }
-      new Notice(`Voor ${labels[kind]} moet de Repo Notebook-app draaien. Start ze met het commando 'Start de Repo Notebook-app'.`, 7000);
+      new Notice(t("Voor {0} moet de Repo Notebook-app draaien. Start ze met het commando '{1}'.", [labels[kind], t("Start de Repo Notebook-app")]), 7000);
       return;
     }
     const notice = kind === "log" ? null : new Notice(`${repo.fullName}: ${labels[kind]}…`, 0);
@@ -574,22 +585,22 @@ export default class RepoNotebookPlugin extends Plugin {
           break;
         case "clone": {
           const r = await this.server.clone(repo);
-          new Notice(r.status === "exists" ? `Stond al lokaal: ${r.path}` : `Gekloond naar ${r.path}`, 6000);
+          new Notice(r.status === "exists" ? t("Stond al lokaal: {0}", [r.path]) : t("Gekloond naar {0}", [r.path]), 6000);
           break;
         }
         case "install":
           await this.server.install(repo);
-          new Notice(`${repo.fullName}: installatie gestart — volg de log in de app of via 'toon log'.`, 6000);
+          new Notice(t("{0}: installatie gestart — volg de log in de app of via 'toon log'.", [repo.fullName]), 6000);
           break;
         case "start": {
           const r = await this.server.start(repo);
           const url = r.runtime?.url || r.url;
-          new Notice(`${repo.fullName}: ${r.status === "running" ? "draait al" : "gestart"}${url ? ` — ${url}` : ""}${r.portWarning ? `\n${r.portWarning}` : ""}`, 7000);
+          new Notice(`${repo.fullName}: ${r.status === "running" ? t("draait al") : t("gestart")}${url ? ` — ${url}` : ""}${r.portWarning ? `\n${r.portWarning}` : ""}`, 7000);
           break;
         }
         case "stop":
           await this.server.stop(repo);
-          new Notice(`${repo.fullName}: gestopt.`);
+          new Notice(t("{0}: gestopt.", [repo.fullName]));
           break;
         case "log": {
           const { log } = await this.server.log(repo);
@@ -598,7 +609,7 @@ export default class RepoNotebookPlugin extends Plugin {
         }
         case "pull": {
           const r = await this.server.pull(repo);
-          new Notice(`${repo.fullName}: pull klaar${typeof r.output === "string" ? `\n${String(r.output).slice(-200)}` : ""}`, 6000);
+          new Notice(`${repo.fullName}: ${t("pull klaar")}${typeof r.output === "string" ? `\n${String(r.output).slice(-200)}` : ""}`, 6000);
           break;
         }
         case "open-local":
@@ -606,7 +617,7 @@ export default class RepoNotebookPlugin extends Plugin {
           break;
         case "remove":
           await this.server.remove(repo);
-          new Notice(`${repo.fullName} verwijderd uit Repo Notebook.`);
+          new Notice(t("{0} verwijderd uit Repo Notebook.", [repo.fullName]));
           break;
       }
       if (kind !== "log" && kind !== "open-local") {
@@ -614,7 +625,7 @@ export default class RepoNotebookPlugin extends Plugin {
         void this.pollRuntimes();
       }
     } catch (error) {
-      new Notice(`${repo.fullName}: ${labels[kind]} mislukt — ${(error as Error).message}`, 8000);
+      new Notice(t("{0}: {1} mislukt — {2}", [repo.fullName, labels[kind], errorText(error)]), 8000);
     } finally {
       notice?.hide();
     }
@@ -660,7 +671,7 @@ export default class RepoNotebookPlugin extends Plugin {
       if (ALLOWED_STATUS.has(status)) patch.status = status;
       else if (!this.warnedStatus.has(`${repo.id}:${status}`)) {
         this.warnedStatus.add(`${repo.id}:${status}`);
-        new Notice(`${repo.fullName}: status "${parsed.status}" kent de app niet — gebruik todo, installed, keep, archive of leeg.`, 7000);
+        new Notice(t('{0}: status "{1}" kent de app niet — gebruik todo, installed, keep, archive of leeg.', [repo.fullName, parsed.status]), 7000);
       }
     }
     if (parsed.category !== String(repo.category || "")) patch.category = parsed.category;
@@ -674,7 +685,7 @@ export default class RepoNotebookPlugin extends Plugin {
       if (vaultNote !== appNote && (appUnchanged || explicit)) patch.note = parsed.notesRegion.trim();
     }
     if (!Object.keys(patch).length) {
-      if (explicit) new Notice(`${repo.fullName}: note en app zijn al gelijk.`);
+      if (explicit) new Notice(t("{0}: note en app zijn al gelijk.", [repo.fullName]));
       return;
     }
     try {
@@ -683,14 +694,14 @@ export default class RepoNotebookPlugin extends Plugin {
       if (patch.note !== undefined) this.pushedNoteHashes.set(repo.id, hashText(updated.note || ""));
       if (this.store) this.store.repos = this.store.repos.map((r) => (r.id === repo.id ? updated : r));
       const what = Object.keys(patch)
-        .map((k) => ({ status: "status", category: "categorie", note: "notities" })[k as keyof typeof patch])
+        .map((k) => ({ status: "status", category: t("categorie"), note: t("notities") })[k as keyof typeof patch])
         .join(", ");
       new Notice(`${repo.fullName}: ${what} → Repo Notebook`, 3000);
       this.events.trigger("store");
       // Re-render this note so its hash/frontmatter reflect the pushed state.
       await this.syncAll({ reason: "push", quiet: true });
     } catch (error) {
-      new Notice(`${repo.fullName}: terugschrijven mislukt — ${(error as Error).message}`, 8000);
+      new Notice(t("{0}: terugschrijven mislukt — {1}", [repo.fullName, errorText(error)]), 8000);
     }
   }
 
@@ -700,7 +711,7 @@ export default class RepoNotebookPlugin extends Plugin {
     this.statusBar.empty();
     this.statusBar.createSpan({ text: `RN ${n}` });
     const dot = this.statusBar.createSpan({ cls: `rn-dot ${this.serverOnline ? "is-online" : "is-offline"}` });
-    dot.setAttribute("title", this.serverOnline ? "Repo Notebook-app online" : "Repo Notebook-app offline");
+    dot.setAttribute("title", this.serverOnline ? t("Repo Notebook-app online") : t("Repo Notebook-app offline"));
     this.statusBar.setAttribute("aria-label", `Repo Notebook: ${n} repos, app ${this.serverOnline ? "online" : "offline"}`);
   }
 

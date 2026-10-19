@@ -31,7 +31,8 @@ const OPTIONS = {
   maxRelated: 6,
   writeIndex: true,
   writeBase: true,
-  serverOnline: false
+  serverOnline: false,
+  lang: "nl" as const
 };
 
 const storeOf = (): Store => ({
