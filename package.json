@@ -14,7 +14,7 @@
     "app": "npm run build && electron .",
     "app:build": "npm run build && electron-builder",
     "mcp": "node mcp/server.js",
-    "test": "node --test server/suggest.test.js test/graph-settings.test.js test/mcp-launcher.test.js tests/i18n.test.mjs tests/i18n-api.test.mjs",
+    "test": "node --test server/suggest.test.js test/graph-settings.test.js test/mcp-launcher.test.js test/search-saved-repos.test.js tests/i18n.test.mjs tests/i18n-api.test.mjs",
     "test:i18n": "node --test tests/i18n.test.mjs tests/i18n-api.test.mjs"
   },
   "build": {

@@ -16,6 +16,7 @@ const EXPECTED_TOOLS = [
   "remove_repo",
   "save_repo",
   "search_github",
+  "search_saved_repos",
   "set_repo_meta",
   "trending_repos"
 ];

@@ -195,6 +195,35 @@ const searchRepos = async (query) => {
 
 const text = (value) => ({ content: [{ type: "text", text: value }] });
 
+const repoLine = (r) =>
+  `- ${r.fullName} — ★${r.stars} ${r.language || ""}` +
+  `${r.status ? ` <${r.status}>` : ""}${r.category ? ` {${r.category}}` : ""}` +
+  `${r.localPath ? " [cloned]" : ""}${r.description ? ` — ${r.description}` : ""}`;
+
+const SEARCH_LIMIT_DEFAULT = 20;
+const SEARCH_LIMIT_MAX = 100;
+
+// Filters the saved shelf without touching GitHub: every word of `query` must
+// appear in the name, description, topics, category, note or language; the
+// optional fields narrow the result further. Pure, so it is easy to test.
+export const searchSavedRepos = (repos, { query = "", language, status, category, limit } = {}) => {
+  const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
+  const same = (a, b) => String(a || "").toLowerCase() === String(b).toLowerCase();
+  const matches = repos.filter((r) => {
+    if (language && !same(r.language, language)) return false;
+    if (typeof status === "string" && status !== "" && !same(r.status, status)) return false;
+    if (category && !String(r.category || "").toLowerCase().includes(String(category).toLowerCase())) return false;
+    if (!words.length) return true;
+    const haystack = [r.fullName, r.description, (r.topics || []).join(" "), r.category, r.note, r.language]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return words.every((word) => haystack.includes(word));
+  });
+  const max = Math.min(Math.max(Number(limit) || SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
+  return { total: matches.length, repos: matches.sort((a, b) => (b.stars || 0) - (a.stars || 0)).slice(0, max) };
+};
+
 export const MCP_VERSION = "0.2.0";
 
 // Builds a fresh server with every tool registered. The stdio entry point
@@ -213,13 +242,28 @@ server.tool(
     const lines = repos
       .slice()
       .sort((a, b) => a.fullName.localeCompare(b.fullName))
-      .map(
-        (r) =>
-          `- ${r.fullName} — ★${r.stars} ${r.language || ""}` +
-          `${r.status ? ` <${r.status}>` : ""}${r.category ? ` {${r.category}}` : ""}` +
-          `${r.localPath ? " [cloned]" : ""}${r.description ? ` — ${r.description}` : ""}`
-      );
+      .map(repoLine);
     return text(`${repos.length} saved repositories:\n${lines.join("\n")}`);
+  }
+);
+
+server.tool(
+  "search_saved_repos",
+  "Search only the repositories already saved in Repo Notebook (no GitHub call). Matches every word against name, description, topics, category, note and language; optional filters narrow by language, status or category. Cheaper than list_saved_repos on a large shelf.",
+  {
+    query: z.string().optional().describe("Words to look for, e.g. 'esp32 display' (all words must match)"),
+    language: z.string().optional().describe("Exact language, e.g. Python"),
+    status: z.enum(["todo", "installed", "keep", "archive"]).optional().describe("Only repos with this status"),
+    category: z.string().optional().describe("Category/collection label (partial match)"),
+    limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional().describe(`Max results, default ${SEARCH_LIMIT_DEFAULT}`)
+  },
+  async (args) => {
+    const { repos } = await readStore();
+    if (!repos.length) return text("No repositories saved yet.");
+    const { total, repos: found } = searchSavedRepos(repos, args);
+    if (!total) return text("No saved repositories match that search.");
+    const shown = found.length < total ? ` (showing ${found.length}, sorted by stars)` : "";
+    return text(`${total} matching saved repositories${shown}:\n${found.map(repoLine).join("\n")}`);
   }
 );
 
