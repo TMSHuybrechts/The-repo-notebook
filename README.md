@@ -50,27 +50,40 @@ npm install
 npm run dev          # dev server + Vite, http://127.0.0.1:5188
 ```
 
-Desktop app (Electron, same server in its own window):
+Desktop app (Electron, same server in its own window) — **Windows, macOS and Linux**:
 
 ```bash
-npm run app          # start
-npm run app:build    # build the Windows installer (electron-builder, output in release/)
+npm run app              # start
+npm run app:build        # installer for the OS you are on (electron-builder, output in release/)
+npm run app:build:win    # NSIS installer (.exe)
+npm run app:build:mac    # .dmg + .zip, arm64 and x64 (build on a Mac)
+npm run app:build:linux  # AppImage + tar.gz, x64 and arm64
 ```
 
-On Windows you can also double-click `Start Repo Notebook.bat`. The app needs `git` on your PATH; `python` for Python repos; Docker Desktop only for container mode.
+Ready-made builds for all three come from the [GitHub Actions workflow](.github/workflows/build.yml): every push builds them as artifacts, a `v*` tag attaches them to a draft release. They are unsigned: Windows shows SmartScreen's *More info → Run anyway*, macOS needs *right-click → Open* the first time (or `xattr -dr com.apple.quarantine "Repo Notebook.app"`), Linux AppImages need `chmod +x`.
 
-Data lives in `%LOCALAPPDATA%\RepoNotebook\data` (`notebook.json`, `clones/`, `runs/`, `server.log`) — or wherever `RN_DATA_DIR` points. The server writes `server.json` (port, pid, MCP endpoint) next to it on start so clients such as the Obsidian plugin can find the desktop app, which uses port 5188 when free and any free port otherwise. Opening `/#repo=owner/name` selects that repo in the UI.
+From a clone you can also double-click `Start Repo Notebook.bat` (Windows) or `Start Repo Notebook.command` (macOS), or run `scripts/start-repo-notebook.sh` (Linux/macOS). The app needs `git` on your PATH; `python` (`python3` on Linux/macOS) for Python repos; Docker only for container mode (Docker Desktop on Windows/macOS, Docker Desktop's user service or your own daemon on Linux). On macOS/Linux the packaged app reads your login shell's PATH once at start, so tools from Homebrew, nvm, `~/.local/bin` or `~/.cargo/bin` are found like in a terminal.
+
+Data lives in one per-user folder — Windows `%LOCALAPPDATA%\RepoNotebook\data`, macOS `~/Library/Application Support/RepoNotebook/data`, Linux `~/.local/share/RepoNotebook/data` (`$XDG_DATA_HOME`) — or wherever `RN_DATA_DIR` points: `notebook.json`, `clones/`, `runs/`, `server.log`, `remote.json`. The server writes `server.json` (port, pid, MCP endpoint, remote port) next to it on start so clients such as the Obsidian plugin can find the desktop app, which uses port 5188 when free and any free port otherwise. Opening `/#repo=owner/name` selects that repo in the UI.
+
+## On your phone or tablet (iPhone, iPad, Android)
+
+Cloning and running needs a real computer, so the phone version is a **remote**: the app keeps running on your PC or Mac and your phone drives it. Click the **Phone** chip in the header, switch remote mode on and scan the QR code with your camera — the page opens with the same shelf, map, Quick start, logs and terminal, laid out for a small screen. In Safari choose *Share → Add to Home Screen* (Chrome on Android: *Install app*) and it behaves like an app that pairs itself on first open.
+
+How it works: remote mode opens a second listener on all interfaces (port 5189 by default, `RN_REMOTE_PORT`/`RN_REMOTE_BIND` to change) that demands an **access code** on every request — set once as a cookie by the QR link, or sent as `Authorization: Bearer …` by scripts — plus the same-origin check for writes. The code grants full control (clone, install, run), so scan it on your own devices only; *New access code* unpairs everything. Over [Tailscale](https://tailscale.com) it works from anywhere without opening a port on your router. The QR code and the code itself are only ever shown on the computer, never to a remote client. `RN_REMOTE=1` forces remote mode on at start (headless setups).
 
 ## Security & privacy
 
-Repo Notebook runs entirely on your own machine and binds to `127.0.0.1` only. Because it can **clone, install and run** the repositories you save, it executes third-party code that you choose — treat it like running any repo locally. The local server rejects requests from other origins/hosts (CSRF + DNS-rebinding guard; only its own origin and the Obsidian plugin's `app://obsidian.md` are allowed), so a website you visit cannot drive it. Your saved repos, clones and any tokens stay local (see `.gitignore`); nothing is uploaded.
+Repo Notebook runs entirely on your own machine and binds to `127.0.0.1` only (remote mode, above, is opt-in and token-protected). Because it can **clone, install and run** the repositories you save, it executes third-party code that you choose — treat it like running any repo locally. The local server rejects requests from other origins/hosts (CSRF + DNS-rebinding guard; only its own origin and the Obsidian plugin's `app://obsidian.md` are allowed), so a website you visit cannot drive it. Your saved repos, clones and any tokens stay local (see `.gitignore`); nothing is uploaded.
 
 Optional environment variables:
 
 - `GITHUB_TOKEN` — higher GitHub API rate limit and access to private repos.
-- `RN_DATA_DIR` — data folder (default `%LOCALAPPDATA%\RepoNotebook\data`). `PORT` — server port (default 5188; the desktop app picks a free one).
+- `RN_DATA_DIR` — data folder (default per platform, see above). `PORT` — server port (default 5188; the desktop app picks a free one).
+- `RN_REMOTE` (`1`), `RN_REMOTE_PORT` (default 5189), `RN_REMOTE_BIND` (default `0.0.0.0`) — remote mode for phones/tablets; normally toggled from the **Phone** chip, stored in `remote.json`.
+- `RN_SKIP_SHELL_PATH` (`1`) — macOS/Linux: don't ask the login shell for its PATH at start.
 - `RN_AI_PROVIDER` — `ollama` (default, local, no tokens) · `anthropic` · `openai`. `RN_AI_MODEL` — model name. `RN_OLLAMA_URL` / `OLLAMA_HOST` — where Ollama listens. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENAI_BASE_URL` — only for those providers.
-- `RN_TERMINAL_SHELL` — shell for the embedded terminal (default `powershell.exe` on Windows, `$SHELL` elsewhere).
+- `RN_TERMINAL_SHELL` — shell for the embedded terminal (default `powershell.exe` on Windows, `$SHELL` elsewhere; bash/zsh start without rc files).
 - `RN_EXTRA_CLONE_DIRS` — extra folders (`;`-separated) scanned for duplicate clones (default: none; a missing folder is skipped).
 
 ## Notes

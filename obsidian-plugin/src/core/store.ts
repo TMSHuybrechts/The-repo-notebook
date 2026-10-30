@@ -12,14 +12,21 @@ import { translate } from "./i18n";
 export const STORE_FILE = "notebook.json";
 export const SERVER_FILE = "server.json";
 
-/** Default data dir of the desktop app: %LOCALAPPDATA%\RepoNotebook\data. */
+/**
+ * Default data dir of the desktop app (same rules as the app's shared/datadir.cjs):
+ * Windows %LOCALAPPDATA%\RepoNotebook\data, macOS ~/Library/Application Support/
+ * RepoNotebook/data, Linux $XDG_DATA_HOME/RepoNotebook/data (~/.local/share).
+ */
 export const defaultDataDir = (): string => {
   const base = process.env.RN_DATA_DIR;
   if (base) return base;
-  const local = process.env.LOCALAPPDATA;
-  if (local) return path.join(local, "RepoNotebook", "data");
   const home = process.env.HOME || process.env.USERPROFILE || ".";
-  return path.join(home, "RepoNotebook", "data");
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || process.env.APPDATA || path.join(home, "AppData", "Local");
+    return path.join(local, "RepoNotebook", "data");
+  }
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "RepoNotebook", "data");
+  return path.join(process.env.XDG_DATA_HOME || path.join(home, ".local", "share"), "RepoNotebook", "data");
 };
 
 export const storePath = (dataDir: string): string => path.join(dataDir, STORE_FILE);

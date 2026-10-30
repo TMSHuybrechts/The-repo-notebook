@@ -2,7 +2,7 @@
 //
 // Lets an AI assistant (e.g. Claude Code) drive the same GitHub repo shelf as
 // the desktop app: list, save, clone, browse trending. It reads and writes the
-// SAME data dir (%LOCALAPPDATA%\RepoNotebook), so the app and this server stay
+// SAME data dir (see shared/datadir.cjs), so the app and this server stay
 // in sync — save a repo here and it shows up in the app, and vice versa.
 //
 // Transports: stdio when run directly (`.mcp.json`, `claude mcp add`, Codex),
@@ -16,12 +16,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { defaultDataDir } from "../shared/datadir.cjs";
 
-const baseDir =
-  process.env.RN_DATA_DIR ||
-  (process.env.LOCALAPPDATA
-    ? path.join(process.env.LOCALAPPDATA, "RepoNotebook", "data")
-    : path.join(process.env.HOME || ".", "RepoNotebook", "data"));
+// Same per-platform folder as the app (shared/datadir.cjs); RN_DATA_DIR overrides.
+const baseDir = defaultDataDir();
 const storePath = path.join(baseDir, "notebook.json");
 const clonesDir = path.join(baseDir, "clones");
 

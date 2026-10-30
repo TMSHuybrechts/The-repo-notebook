@@ -1121,6 +1121,11 @@ button:disabled {
     height: 42px;
   }
 
+  /* flex-basis 138px is a width in the row layout, but a height once stacked */
+  .save-form .primary {
+    flex: 0 0 auto;
+  }
+
   .repo-row {
     grid-template-columns: 32px 1fr;
     height: 72px;
@@ -2703,4 +2708,115 @@ button:disabled {
 .terminal-notice {
   color: #4fd1a5;
   margin-right: 6px;
+}
+
+/* --- Remote mode (phone / tablet pairing) --- */
+.remote-chip {
+  align-items: center;
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.3);
+  color: #bcd8ff;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.remote-modal {
+  max-width: 760px;
+  width: min(760px, 100%);
+}
+
+.remote-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  gap: 10px;
+}
+
+.remote-toggle input {
+  accent-color: #2f81f7;
+  height: 18px;
+  margin: 0;
+  width: 18px;
+}
+
+.remote-urls {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.remote-url {
+  align-items: center;
+  background: #070c13;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  padding: 10px;
+}
+
+.remote-url img {
+  background: #0b0e14;
+  border-radius: 6px;
+  height: 150px;
+  width: 150px;
+}
+
+.remote-url > div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.remote-url strong {
+  font-size: 12px;
+}
+
+.remote-url code {
+  color: #dce8f7;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  overflow: auto;
+  white-space: nowrap;
+}
+
+.remote-foot {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 12px;
+  line-height: 1.45;
+}
+
+/* Phone (home-screen web app): notch-safe header, stacked QR cards. */
+@media (max-width: 560px) {
+  .topbar {
+    padding-top: calc(14px + env(safe-area-inset-top));
+  }
+
+  .brand {
+    flex-wrap: wrap;
+    font-size: 17px;
+    gap: 8px;
+  }
+
+  .remote-url {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .remote-url code {
+    max-width: 100%;
+  }
+
+  .terminal-dock {
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+  }
 }
