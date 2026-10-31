@@ -47,6 +47,11 @@ jobs:
         env:
           RN_SKIP_SHELL_PATH: "1"
 
+      # electron-builder packages dist/ as-is; without this step the
+      # installers ship an app with no UI.
+      - name: Build web app
+        run: npm run build
+
       - name: Build installers
         run: npx electron-builder ${{ matrix.target }} --publish never
         env:
