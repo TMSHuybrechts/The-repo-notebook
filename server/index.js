@@ -1,9 +1,27 @@
 import express from "express";
 import fs from "node:fs/promises";
-import { createReadStream, readFileSync, unlinkSync, existsSync } from "node:fs";
+import { createReadStream, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import http from "node:http";
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import QRCode from "qrcode";
+import { defaultDataDir } from "../shared/datadir.cjs";
+import {
+  childSpawnOptions,
+  findOnPath,
+  fixPath,
+  isWindows,
+  killTree,
+  launchDocker,
+  pythonCommand,
+  quitDocker,
+  reachableAddresses,
+  resolveNpmCli,
+  venvPython
+} from "./platform.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildGraph } from "./graph.js";
 import { buildSuggestions, tasteQueries } from "./suggest.js";
@@ -12,10 +30,12 @@ import { normalizeLocale, translate } from "../shared/i18n.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
-const dataDir = process.env.RN_DATA_DIR
-  || (process.env.LOCALAPPDATA
-    ? path.join(process.env.LOCALAPPDATA, "RepoNotebook", "data")
-    : path.join(root, "data"));
+// GUI launches on macOS/Linux can come with a bare PATH; merge in the user's
+// shell PATH once so git/node/npm/python are found like in a terminal.
+fixPath();
+// %LOCALAPPDATA%\RepoNotebook\data, ~/Library/Application Support/RepoNotebook/data
+// or ~/.local/share/RepoNotebook/data — RN_DATA_DIR overrides (shared/datadir.cjs).
+const dataDir = defaultDataDir();
 const storePath = path.join(dataDir, "notebook.json");
 const clonesDir = path.join(dataDir, "clones");
 const runsDir = path.join(dataDir, "runs");
@@ -55,7 +75,78 @@ const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 // has full Node access on this machine, so allowing its origin adds no new
 // exposure — it only lets the plugin's POSTs pass the CSRF check.
 const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`, "app://obsidian.md"]);
+
+// --- Remote mode (phone / tablet / another PC) -----------------------------
+// Opt-in second listener on a LAN/VPN address (see startRemote below). Every
+// connection on it is tagged `rnRemote`; such requests must carry the access
+// token (cookie set once via the QR/link, or Authorization: Bearer) and pass a
+// same-origin check for writes. The loopback listener keeps the rules above.
+// The token grants full control (clone/install/run), so the settings and the
+// QR code are only served over loopback — never to a remote client.
+const remoteConfigPath = path.join(dataDir, "remote.json");
+const newRemoteToken = () => crypto.randomBytes(24).toString("base64url");
+const loadRemoteConfig = () => {
+  try {
+    const saved = JSON.parse(readFileSync(remoteConfigPath, "utf8"));
+    return {
+      enabled: saved.enabled === true,
+      token: typeof saved.token === "string" && saved.token.length >= 16 ? saved.token : "",
+      port: Number(saved.port) || 0
+    };
+  } catch {
+    return { enabled: false, token: "", port: 0 };
+  }
+};
+const savedRemote = loadRemoteConfig();
+const remoteState = {
+  enabled: process.env.RN_REMOTE === "1" || savedRemote.enabled,
+  token: savedRemote.token || newRemoteToken(),
+  port: Number(process.env.RN_REMOTE_PORT) || savedRemote.port || 5189,
+  bind: process.env.RN_REMOTE_BIND || "0.0.0.0",
+  server: null,
+  error: ""
+};
+const REMOTE_COOKIE = "rn_remote";
+const cookieValue = (req, name) => {
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(rest.join("="));
+  }
+  return "";
+};
+const tokenMatches = (candidate) => {
+  if (!candidate || !remoteState.token) return false;
+  const given = Buffer.from(String(candidate));
+  const expected = Buffer.from(remoteState.token);
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+};
+const remoteDeniedPage = () => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Repo Notebook</title><body style="font:16px system-ui;background:#0b0e14;color:#e6edf3;padding:32px;max-width:520px;margin:auto">
+<h1 style="font-size:22px">Repo Notebook</h1><p>This device is not paired yet. On the computer that runs Repo Notebook, open the
+<strong>Remote</strong> chip in the header and scan the QR code (or open its link) on this device.</p></body>`;
+
 app.use((req, res, next) => {
+  if (req.socket.rnRemote) {
+    req.remote = true;
+    // First visit from the QR code / link: store the token in a cookie and
+    // continue on the clean URL so the token never lingers in the address bar.
+    if (req.method === "GET" && typeof req.query.token === "string") {
+      if (!tokenMatches(req.query.token)) return res.status(403).type("text/plain").send("Repo Notebook: wrong access token.");
+      res.cookie(REMOTE_COOKIE, remoteState.token, { httpOnly: true, sameSite: "strict", maxAge: 365 * 24 * 3600 * 1000, path: "/" });
+      return res.redirect(req.path || "/");
+    }
+    const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (!tokenMatches(bearer) && !tokenMatches(cookieValue(req, REMOTE_COOKIE))) {
+      if (req.path.startsWith("/api/") || req.path === "/mcp") return res.status(401).json({ error: "Remote access needs the access token." });
+      return res.status(401).type("text/html").send(remoteDeniedPage());
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      const origin = req.headers.origin;
+      if (origin && origin !== `${req.protocol}://${req.headers.host}`) return res.status(403).json({ error: "Forbidden origin." });
+    }
+    if (req.path.startsWith("/api/remote")) return res.status(403).json({ error: "Remote settings are only available on the computer itself." });
+    return next();
+  }
   if (!allowedHosts.has(req.headers.host)) {
     return res.status(403).json({ error: "Forbidden host." });
   }
@@ -121,23 +212,13 @@ const apiHeaders = () => ({
 });
 
 const safeName = (value) => value.replace(/[^A-Za-z0-9._-]/g, "-");
-// npm is op Windows een .cmd-shim zonder .exe: spawn met shell:false vindt
-// "npm" dan niet (ENOENT). npm_execpath bestaat alleen als de app zelf via
-// `npm run` gestart is; de verpakte exe moet npm-cli.js dus zelf op PATH
-// zoeken en direct onder node draaien.
+// npm: on Windows it is a .cmd shim without .exe, so spawn(shell:false) can't
+// find it; in the packaged app process.execPath is Electron, not node. In both
+// cases run npm-cli.js directly under a real node (see platform.resolveNpmCli).
+// npm_execpath only exists when the app itself was started via `npm run`.
 let npmCliCache;
-const resolveNpmCli = () => {
-  if (npmCliCache !== undefined) return npmCliCache;
-  npmCliCache = null;
-  const dirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
-  const nodeDir = dirs.find((dir) => existsSync(path.join(dir, "node.exe")));
-  for (const dir of nodeDir ? [nodeDir, ...dirs] : dirs) {
-    const cli = path.join(dir, "node_modules", "npm", "bin", "npm-cli.js");
-    if (existsSync(cli)) {
-      npmCliCache = { node: nodeDir ? path.join(nodeDir, "node.exe") : process.execPath, cli };
-      break;
-    }
-  }
+const npmCli = () => {
+  if (npmCliCache === undefined) npmCliCache = resolveNpmCli();
   return npmCliCache;
 };
 
@@ -159,14 +240,17 @@ const commandSpec = (cmd, args) => {
       env.ELECTRON_RUN_AS_NODE = "1";
       return { cmd: process.execPath, args: [process.env.npm_execpath, ...args], env };
     }
-    if (process.platform === "win32") {
-      const npm = resolveNpmCli();
+    // POSIX with a working `npm` on PATH: use it as is. Otherwise (Windows,
+    // or a packaged app whose PATH has node but no npm wrapper) go via node.
+    if (isWindows || !findOnPath("npm")) {
+      const npm = npmCli();
       if (npm) {
         if (npm.node === process.execPath) env.ELECTRON_RUN_AS_NODE = "1";
         return { cmd: npm.node, args: [npm.cli, ...args], env };
       }
     }
   }
+  if (cmd === "python") return { cmd: pythonCommand(), args, env };
   return { cmd, args, env };
 };
 
@@ -401,13 +485,12 @@ const detectRuntime = async (target) => {
 
   // Python installs go into a venv inside the clone — never the global
   // site-packages, so a repo can't pollute or break the system Python.
-  const venvPy = process.platform === "win32"
-    ? path.join(target, ".venv", "Scripts", "python.exe")
-    : path.join(target, ".venv", "bin", "python");
+  const venvPy = venvPython(target);
   const pythonPlan = async (installArgs, installLabel) => {
     const hasVenv = await fileExists(venvPy);
     const steps = [];
-    if (!hasVenv) steps.push({ cmd: "python", args: ["-m", "venv", ".venv"], label: "python -m venv .venv" });
+    // "python" is resolved per platform in commandSpec (python3 on Linux/macOS).
+    if (!hasVenv) steps.push({ cmd: "python", args: ["-m", "venv", ".venv"], label: `${pythonCommand()} -m venv .venv` });
     steps.push({ cmd: venvPy, args: ["-m", "pip", "install", ...installArgs], label: `(.venv) pip install ${installLabel}` });
     return {
       hasVenv,
@@ -430,7 +513,7 @@ const detectRuntime = async (target) => {
       start: pyEntry
         ? plan.hasVenv
           ? { cmd: venvPy, args: [pyEntry], label: `(.venv) python ${pyEntry}` }
-          : { cmd: "python", args: [pyEntry], label: `python ${pyEntry}` }
+          : { cmd: "python", args: [pyEntry], label: `${pythonCommand()} ${pyEntry}` }
         : null
     };
   }
@@ -551,7 +634,7 @@ const runCommand = async (repo, target, command, timeoutMs = 900000) => {
     const spec = commandSpec(command.cmd, command.args);
     let child;
     try {
-      child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env });
+      child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env, ...childSpawnOptions() });
     } catch (error) {
       reject(error);
       return;
@@ -559,7 +642,7 @@ const runCommand = async (repo, target, command, timeoutMs = 900000) => {
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
+      killTree(child);
       reject(new Error(`${command.label} timed out.`));
     }, timeoutMs);
 
@@ -589,7 +672,7 @@ const startCommand = async (repo, target, command, opts = {}) => {
   const spec = commandSpec(command.cmd, command.args);
   let child;
   try {
-    child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env });
+    child = spawn(spec.cmd, spec.args, { cwd: target, shell: false, env: spec.env, ...childSpawnOptions() });
   } catch (error) {
     await appendLog(repo, `\n[start error] ${error.message}\n`);
     throw error;
@@ -649,12 +732,16 @@ const TERMINAL_MAX_OUTPUT = 200000;
 const TERMINAL_KEEP_OUTPUT = 160000;
 
 const terminalShell = () => {
-  if (process.platform === "win32") {
+  if (isWindows) {
     const pwsh = process.env.RN_TERMINAL_SHELL || "powershell.exe";
     return { cmd: pwsh, args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", "-"] };
   }
+  // The user's login shell, reading commands from stdin. No rc files: a
+  // prompt/theme would garble the output; PATH already comes from fixPath().
   const cmd = process.env.RN_TERMINAL_SHELL || process.env.SHELL || "/bin/bash";
-  return { cmd, args: cmd.endsWith("bash") ? ["--noprofile", "--norc"] : [] };
+  const name = path.basename(cmd);
+  const args = name === "bash" ? ["--noprofile", "--norc"] : name === "zsh" ? ["-f"] : [];
+  return { cmd, args };
 };
 
 const terminalSnapshot = (repo) => {
@@ -684,7 +771,7 @@ const startTerminalSession = async (repo, target) => {
   const child = spawn(shell.cmd, shell.args, {
     cwd: target,
     shell: false,
-    windowsHide: true,
+    ...childSpawnOptions(),
     env: { ...process.env, TERM: process.env.TERM || "xterm-256color", GIT_TERMINAL_PROMPT: "0" }
   });
   const session = {
@@ -708,7 +795,7 @@ const startTerminalSession = async (repo, target) => {
     session.running = false;
   });
 
-  if (process.platform === "win32") {
+  if (isWindows) {
     child.stdin.write("[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new()\n");
   }
   return session;
@@ -717,13 +804,7 @@ const startTerminalSession = async (repo, target) => {
 const stopTerminalSession = (repo) => {
   const session = terminalSessions.get(repo.id);
   if (!session) return;
-  if (session.running) {
-    if (process.platform === "win32") {
-      spawn("taskkill.exe", ["/PID", String(session.child.pid), "/T", "/F"], { shell: false, windowsHide: true });
-    } else {
-      session.child.kill("SIGTERM");
-    }
-  }
+  if (session.running) killTree(session.child);
   session.running = false;
 };
 
@@ -731,8 +812,18 @@ const stopAllTerminals = () => {
   for (const [id] of terminalSessions) stopTerminalSession({ id });
 };
 
+// Stop every process Repo Notebook started (used on shutdown so no dev server
+// outlives the app and squats its port for the next start).
+const stopAllRuns = () => {
+  for (const [id, run] of running) {
+    run.stopping = true;
+    killTree(run.child);
+    running.delete(id);
+  }
+};
+
 const openPath = (target) => {
-  const opener = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
+  const opener = isWindows ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
   const child = spawn(opener, [target], { detached: true, shell: false, stdio: "ignore" });
   child.on("error", () => {});
   child.unref();
@@ -918,10 +1009,10 @@ app.post("/api/notebook/:owner/:repo/open-local", async (req, res) => {
   }
 });
 
-// --- Docker: containermodus per repo. Docker Desktop wordt on-demand
-// gestart (Thomas houdt hem bewust uit voor RAM) en kan vanuit de app weer
-// afgesloten worden zodra er geen rn-containers meer draaien. ---
-const DOCKER_DESKTOP_EXE = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+// --- Docker: container mode per repo. Docker Desktop is started on demand
+// (keeping it closed saves RAM) and can be quit from the app again once no
+// rn-containers run. Windows/macOS: Docker Desktop; Linux: Docker Desktop's
+// user service when present, otherwise the daemon is the user's business. ---
 const CONTAINER_IMAGES = { Node: "node:22", Python: "python:3.12", Go: "golang:1.23", Rust: "rust:1" };
 
 const containerName = (repo) => `rn-${safeName(repo.owner)}-${safeName(repo.name)}`.toLowerCase();
@@ -969,10 +1060,8 @@ app.post("/api/docker/start", async (_req, res) => {
     if (!status.installed) return res.status(400).json({ error: "Docker Desktop is niet geïnstalleerd." });
     if (status.running) return res.json({ ...status, started: false });
 
-    const child = spawn(DOCKER_DESKTOP_EXE, [], { detached: true, shell: false, stdio: "ignore" });
-    child.on("error", () => {});
-    child.unref();
-    // Poll tot de daemon antwoordt (image-engine opstarten duurt 20-60s).
+    if (!launchDocker()) return res.status(400).json({ error: "Start de Docker-daemon zelf (bv. `sudo systemctl start docker`) en probeer opnieuw." });
+    // Poll until the daemon answers (starting the engine takes 20-60s).
     for (let attempt = 0; attempt < 30; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       const check = await dockerStatus();
@@ -989,11 +1078,7 @@ app.post("/api/docker/stop", async (_req, res) => {
     if (runningContainers() > 0) {
       return res.status(400).json({ error: "Er draaien nog containers vanuit Repo Notebook — stop die eerst." });
     }
-    spawn("taskkill.exe", ["/IM", "Docker Desktop.exe", "/F"], { shell: false }).on("error", () => {});
-    // WSL-backend meteen afbouwen, anders blijft de RAM bezet.
-    setTimeout(() => {
-      spawn("wsl.exe", ["--terminate", "docker-desktop"], { shell: false }).on("error", () => {});
-    }, 2000);
+    if (!quitDocker()) return res.status(400).json({ error: "Stop de Docker-daemon zelf (bv. `sudo systemctl stop docker`)." });
     res.json({ stopped: true });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -1327,11 +1412,7 @@ app.post("/api/notebook/:owner/:repo/stop", async (req, res) => {
     if (run.mode === "container" && run.containerName) {
       await runQuick("docker", ["stop", "-t", "5", run.containerName], 20000);
     }
-    if (process.platform === "win32") {
-      spawn("taskkill.exe", ["/PID", String(run.child.pid), "/T", "/F"], { shell: false });
-    } else {
-      run.child.kill("SIGTERM");
-    }
+    killTree(run.child);
     running.delete(repo.id);
     await appendLog(repo, "\n[stopped from Repo Notebook]\n");
     res.json({ status: "stopped", runtime: await runtimeFor(repo) });
@@ -1505,12 +1586,133 @@ app.get("/api/health", (_req, res) => {
 // pays that wait, so cache the outcome briefly instead of re-probing per request.
 const AI_STATUS_TTL = 15000;
 let aiStatusCache = { at: 0, value: null };
-app.get("/api/config", async (_req, res) => {
+app.get("/api/config", async (req, res) => {
   if (!aiStatusCache.value || Date.now() - aiStatusCache.at > AI_STATUS_TTL) {
     aiStatusCache = { at: Date.now(), value: await resolveAi() };
   }
   const ai = aiStatusCache.value;
-  res.json({ ai: ai.available, aiProvider: ai.provider, token: Boolean(process.env.GITHUB_TOKEN) });
+  res.json({
+    ai: ai.available,
+    aiProvider: ai.provider,
+    token: Boolean(process.env.GITHUB_TOKEN),
+    // remote = this request came in over the remote listener (phone/tablet):
+    // the UI hides settings that only make sense on the computer itself.
+    remote: req.remote === true,
+    platform: process.platform
+  });
+});
+
+// --- Remote mode settings (loopback only; the guard blocks these for remote
+// clients). The QR code and link carry the token, so they are the pairing
+// secret: scan them on your own devices only. ---
+const remoteUrls = () =>
+  reachableAddresses().map((entry) => ({
+    ...entry,
+    base: `http://${entry.address}:${remoteState.port}/`,
+    url: `http://${entry.address}:${remoteState.port}/?token=${remoteState.token}`
+  }));
+const remoteStatus = () => ({
+  enabled: remoteState.enabled,
+  listening: Boolean(remoteState.server),
+  port: remoteState.port,
+  bind: remoteState.bind,
+  token: remoteState.token,
+  hostname: os.hostname(),
+  urls: remoteUrls(),
+  error: remoteState.error
+});
+const saveRemoteConfig = async () => {
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(
+    remoteConfigPath,
+    `${JSON.stringify({ enabled: remoteState.enabled, token: remoteState.token, port: remoteState.port }, null, 2)}\n`,
+    { mode: 0o600 }
+  );
+};
+const startRemote = () =>
+  new Promise((resolve) => {
+    if (remoteState.server) return resolve(true);
+    const server = http.createServer(app);
+    server.on("connection", (socket) => {
+      socket.rnRemote = true;
+    });
+    server.once("error", (error) => {
+      remoteState.error = error.code === "EADDRINUSE" ? `Port ${remoteState.port} is already in use.` : error.message;
+      remoteState.server = null;
+      resolve(false);
+    });
+    server.listen(remoteState.port, remoteState.bind, () => {
+      remoteState.server = server;
+      remoteState.error = "";
+      console.log(`Repo Notebook remote access on http://${remoteState.bind}:${remoteState.port} (token required)`);
+      resolve(true);
+    });
+  });
+const stopRemote = () =>
+  new Promise((resolve) => {
+    const server = remoteState.server;
+    remoteState.server = null;
+    if (!server) return resolve();
+    server.closeAllConnections?.();
+    server.close(() => resolve());
+  });
+
+app.get("/api/remote", (_req, res) => res.json(remoteStatus()));
+
+app.post("/api/remote", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    if (body.port !== undefined) {
+      const next = Number(body.port);
+      if (!Number.isInteger(next) || next < 1024 || next > 65535) return res.status(400).json({ error: "Ongeldige poort." });
+      if (next === port) return res.status(400).json({ error: "Die poort is al die van de app zelf." });
+      if (next !== remoteState.port) {
+        await stopRemote();
+        remoteState.port = next;
+      }
+    }
+    if (body.regenerate === true) {
+      await stopRemote(); // paired devices lose access: they re-pair with the new code
+      remoteState.token = newRemoteToken();
+    }
+    if (typeof body.enabled === "boolean") remoteState.enabled = body.enabled;
+    await saveRemoteConfig();
+    if (remoteState.enabled) await startRemote();
+    else await stopRemote();
+    await writeServerInfo();
+    res.json(remoteStatus());
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/api/remote/qr.svg", async (req, res) => {
+  try {
+    const target = String(req.query.target || "");
+    if (!remoteUrls().some((entry) => entry.url === target)) return res.status(400).json({ error: "Unknown remote URL." });
+    const svg = await QRCode.toString(target, { type: "svg", margin: 1, color: { dark: "#e6edf3ff", light: "#00000000" } });
+    res.set("Cache-Control", "no-store").type("image/svg+xml").send(svg);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Web-app manifest so a phone can put the app on its home screen ("Add to
+// Home Screen" on iOS, "Install app" on Android). For a remote client the
+// start URL carries the token: the home-screen app pairs itself on first open
+// even when it does not share Safari's cookies.
+app.get("/manifest.webmanifest", (req, res) => {
+  res.set("Cache-Control", "no-store").type("application/manifest+json").json({
+    name: "Repo Notebook",
+    short_name: "Repo Notebook",
+    description: "Your GitHub repositories: save, clone, install and run them from one place.",
+    start_url: req.remote ? `/?token=${remoteState.token}` : "/",
+    scope: "/",
+    display: "standalone",
+    background_color: "#0b0e14",
+    theme_color: "#0b0e14",
+    icons: [{ src: "/icon.png", sizes: "256x256", type: "image/png", purpose: "any" }]
+  });
 });
 
 // --- Bulk add: paste any text (e.g. an Instagram caption) and save every
@@ -1948,8 +2150,8 @@ app.post("/api/notebook/:owner/:repo/delete-clone", async (req, res) => {
     const target = cloneTarget(repo); // guarded: cannot escape the data dir
     const run = running.get(repo.id);
     if (run) {
-      if (process.platform === "win32") spawn("taskkill.exe", ["/PID", String(run.child.pid), "/T", "/F"], { shell: false });
-      else run.child.kill("SIGTERM");
+      run.stopping = true;
+      killTree(run.child);
       running.delete(repo.id);
     }
     stopTerminalSession(repo);
@@ -2076,7 +2278,19 @@ const writeServerInfo = async () => {
   try {
     await fs.writeFile(
       serverInfoPath,
-      `${JSON.stringify({ port, pid: process.pid, startedAt: new Date().toISOString(), dataDir, mode: production ? "production" : "dev", mcp: mcpEndpoint }, null, 2)}\n`
+      `${JSON.stringify(
+        {
+          port,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          dataDir,
+          mode: production ? "production" : "dev",
+          mcp: mcpEndpoint,
+          remote: remoteState.server ? { enabled: true, port: remoteState.port } : { enabled: false }
+        },
+        null,
+        2
+      )}\n`
     );
   } catch {
     /* non-fatal */
@@ -2093,13 +2307,15 @@ const removeServerInfo = () => {
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => {
     stopAllTerminals();
+    stopAllRuns();
     removeServerInfo();
     process.exit(0);
   });
 }
 process.on("exit", removeServerInfo);
 
-app.listen(port, "127.0.0.1", () => {
+app.listen(port, "127.0.0.1", async () => {
   console.log(`Repo Notebook running at http://127.0.0.1:${port}`);
+  if (remoteState.enabled) await startRemote();
   void writeServerInfo();
 });

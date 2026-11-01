@@ -12,11 +12,13 @@ const http = require("node:http");
 const net = require("node:net");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
+const { defaultDataDir } = require("../shared/datadir.cjs");
 
 const appRoot = path.join(__dirname, "..");
-// Stable, update-proof data location (chosen by the user).
-const baseDir = process.env.LOCALAPPDATA || process.env.APPDATA || app.getPath("home");
-const dataDir = path.join(baseDir, "RepoNotebook", "data");
+// Stable, update-proof per-user data location, the same on every platform as
+// the server and MCP server use (shared/datadir.cjs).
+const dataDir = defaultDataDir();
+const isMac = process.platform === "darwin";
 
 let serverProc = null;
 let serverPort = 0;
@@ -119,7 +121,10 @@ const startServer = async () => {
       PORT: String(serverPort)
     },
     stdio: ["ignore", serverLog, serverLog],
-    windowsHide: true
+    windowsHide: true,
+    // POSIX: own process group, so killServer can take the server and every
+    // repo it started down together (taskkill /T does that on Windows).
+    detached: process.platform !== "win32"
   });
   serverProc.once("error", (error) => console.error("Repo Notebook server spawn failed:", error));
   serverProc.on("exit", () => {
@@ -187,7 +192,14 @@ const killServer = () => {
     if (process.platform === "win32") {
       spawn("taskkill.exe", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
     } else {
+      // SIGTERM lets the server stop its own children first; the process
+      // group kill catches anything that ignored it.
       proc.kill("SIGTERM");
+      try {
+        process.kill(-proc.pid, "SIGTERM");
+      } catch {
+        /* group already gone */
+      }
     }
   } catch {
     /* ignore */
@@ -217,14 +229,25 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow().catch(console.error);
+  app.on("activate", async () => {
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    // macOS: the Dock icon reopens the window; the server may have been
+    // stopped meanwhile, so bring it back first.
+    try {
+      if (!serverProc) await startServer();
+      await createWindow();
+    } catch (err) {
+      console.error(err);
+    }
   });
 });
 
 app.on("window-all-closed", () => {
+  // macOS apps keep running without windows (Dock icon reopens one); the
+  // server keeps running too so Obsidian/MCP/remote clients stay connected.
+  if (isMac) return;
   killServer();
-  if (process.platform !== "darwin") app.quit();
+  app.quit();
 });
 app.on("before-quit", killServer);
 app.on("quit", killServer);

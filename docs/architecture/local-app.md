@@ -14,7 +14,22 @@ During development the Express server uses Vite middleware, so `npm run dev` sta
 
 ## Local Startup
 
-`Start Repo Notebook.bat` is a Windows launcher for local use. It delegates to `scripts/start-repo-notebook.ps1`, checks that Node.js exists, installs project dependencies when `node_modules` is missing, starts the app on port `5188`, and opens `http://127.0.0.1:5188/` when the server is reachable.
+`Start Repo Notebook.bat` is a Windows launcher for local use. It delegates to `scripts/start-repo-notebook.ps1`, checks that Node.js exists, installs project dependencies when `node_modules` is missing, starts the app on port `5188`, and opens `http://127.0.0.1:5188/` when the server is reachable. `scripts/start-repo-notebook.sh` (and `Start Repo Notebook.command` for Finder) do the same on Linux and macOS.
+
+## Platforms
+
+Everything OS-specific sits in `server/platform.js` and `shared/datadir.cjs`:
+
+- **Data dir** — `%LOCALAPPDATA%\RepoNotebook\data` (Windows), `~/Library/Application Support/RepoNotebook/data` (macOS), `$XDG_DATA_HOME/RepoNotebook/data` (Linux); `RN_DATA_DIR` overrides. The server, the Electron shell, the MCP server and the Obsidian plugin all derive the same path.
+- **Process trees** — repo children are spawned in their own process group on POSIX (`detached: true`) so `killTree` can stop a whole `npm run dev` tree with one group signal; Windows uses `taskkill /T /F`. On shutdown the server stops every run and terminal it started.
+- **PATH** — GUI launches on macOS/Linux can come with a bare PATH; `fixPath()` asks the login shell for its PATH once and merges it with well-known tool folders (Homebrew, nvm, `~/.local/bin`, `~/.cargo/bin`, …).
+- **Commands** — `npm` runs via `npm-cli.js` under a real `node` whenever the `npm` wrapper is not usable (Windows `.cmd` shim, packaged app); `python` becomes `python3` where that is the only Python; the venv interpreter lives in `.venv/Scripts` or `.venv/bin`.
+- **Docker** — Docker Desktop on Windows (`Docker Desktop.exe`, WSL backend stopped on quit) and macOS (`open -a Docker` / AppleScript quit); on Linux the Docker Desktop user service when present, otherwise the daemon is left to the user.
+- **Packaging** — electron-builder targets: NSIS (Windows), dmg + zip (macOS, arm64 and x64), AppImage + tar.gz (Linux). `.github/workflows/build.yml` builds all three on GitHub's runners and drafts a release on `v*` tags.
+
+## Remote mode
+
+Phones and tablets cannot clone or run code, so the mobile version is a remote control of a running app. Remote mode (off by default, toggled via `POST /api/remote` from the **Phone** chip, persisted in `<dataDir>/remote.json`, or forced with `RN_REMOTE=1`) opens a second HTTP listener on `RN_REMOTE_BIND:RN_REMOTE_PORT` (default `0.0.0.0:5189`). Connections on that listener are tagged, and the guard then requires the access token on every request: a `?token=` query on a GET sets an `HttpOnly; SameSite=Strict` cookie and redirects to the clean URL, scripts can send `Authorization: Bearer <token>`. Writes must be same-origin. `/api/remote*` (status, token, QR SVG) is refused on the remote listener, so the pairing secret is only ever shown on the computer itself. `/manifest.webmanifest` is generated per request: for a remote viewer its `start_url` carries the token, which makes an iOS/Android home-screen web app pair itself on first launch. `/api/config` reports `remote: true` so the UI hides the pairing chip there.
 
 ## API Surface
 
@@ -32,6 +47,8 @@ During development the Express server uses Vite middleware, so `npm run dev` sta
 - `POST /api/notebook/:owner/:repo/stop` stops a process started by Repo Notebook.
 - `GET|POST /api/notebook/:owner/:repo/terminal[/start|/input|/clear|/stop]` manages one persistent local shell session rooted in a cloned repository.
 - `GET /api/mcp/status` reports the MCP transports and the local HTTP endpoint.
+- `GET|POST /api/remote` reads or changes remote mode (`{ enabled, regenerate, port }`); `GET /api/remote/qr.svg?target=<pairing url>` renders the QR code. Loopback only.
+- `GET /manifest.webmanifest` serves the web-app manifest (home-screen install), with a token-carrying `start_url` for remote viewers.
 - `POST /mcp` serves the Repo Notebook MCP tools over stateless Streamable HTTP (same tools as `mcp/server.js` over stdio).
 
 ## GitHub Data

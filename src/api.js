@@ -90,6 +90,15 @@ export const loadConfig = () => apiFetch("/api/config").then(json);
 
 export const loadMcpStatus = () => apiFetch("/api/mcp/status").then(json);
 
+export const loadRemote = () => apiFetch("/api/remote").then(json);
+
+export const updateRemote = (patch) =>
+  apiFetch("/api/remote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch)
+  }).then(json);
+
 const terminalUrl = (repo, suffix = "") =>
   `/api/notebook/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/terminal${suffix}`;
 

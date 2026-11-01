@@ -124,7 +124,11 @@ export class ServerClient {
   async launchApp(exePath: string, timeoutMs = 25000): Promise<string> {
     if (!exePath) throw new Error(t("Geen pad naar Repo Notebook.exe ingesteld (instellingen)."));
     if (!fs.existsSync(exePath)) throw new Error(t("Repo Notebook.exe niet gevonden: {0}", [exePath]));
-    const child = spawn(exePath, [], { detached: true, stdio: "ignore", windowsHide: false });
+    // macOS: a .app bundle is a folder, so hand it to `open`; elsewhere the
+    // path is the executable itself (.exe, AppImage, or the unpacked binary).
+    const child = /\.app\/?$/i.test(exePath)
+      ? spawn("open", ["-a", exePath], { detached: true, stdio: "ignore" })
+      : spawn(exePath, [], { detached: true, stdio: "ignore", windowsHide: false });
     child.on("error", () => {});
     child.unref();
     const started = Date.now();

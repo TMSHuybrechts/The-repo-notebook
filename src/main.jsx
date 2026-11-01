@@ -32,6 +32,7 @@ import {
   Radio,
   RefreshCcw,
   Search,
+  Smartphone,
   Sparkles,
   Square,
   Star,
@@ -42,7 +43,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { bulkSave, bulkVerdictStatus, checkUpdates, clearTerminal, cloneRepo, deleteClone, diagnoseRepo, dockerStart, dockerStatus, dockerStop, harvest, importNotebook, importStars, installRepo, loadConfig, loadDuplicates, loadEnv, loadGraph, loadLog, loadMcpStatus, loadNotebook, loadRuntime, loadSuggestions, loadTerminal, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveEnv, saveRepo, sendTerminalInput, setRepoMeta, startBulkVerdicts, startContainer, startRepo, startTerminal, stopRepo, stopTerminal } from "./api";
+import { bulkSave, bulkVerdictStatus, checkUpdates, clearTerminal, cloneRepo, deleteClone, diagnoseRepo, dockerStart, dockerStatus, dockerStop, harvest, importNotebook, importStars, installRepo, loadConfig, loadDuplicates, loadEnv, loadGraph, loadLog, loadMcpStatus, loadNotebook, loadRemote, loadRuntime, loadSuggestions, loadTerminal, loadTrending, openLocalRepo, pullRepo, refreshRepo, removeRepo, repoSize, repoVerdict, saveEnv, saveRepo, sendTerminalInput, setRepoMeta, startBulkVerdicts, startContainer, startRepo, startTerminal, stopRepo, stopTerminal, updateRemote } from "./api";
 import { GraphView, RelatedPanel } from "./graph-view.jsx";
 import { QuickstartView } from "./quickstart.jsx";
 import { fileSize, languageColor, letters, repoLetter, shortDate, shortNumber } from "./format";
@@ -199,9 +200,10 @@ function App() {
   const [cloneFor, setCloneFor] = useState(null);
   const [trending, setTrending] = useState([]);
   const [trendingError, setTrendingError] = useState("");
-  const [config, setConfig] = useState({ ai: false, token: false });
+  const [config, setConfig] = useState({ ai: false, token: false, remote: false });
   const [addOpen, setAddOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [remoteOpen, setRemoteOpen] = useState(false);
   const [view, setView] = useState("list");
   const [graph, setGraph] = useState(null);
   const [graphLoading, setGraphLoading] = useState(false);
@@ -455,7 +457,7 @@ function App() {
 
   return (
     <main className="app">
-      <TopBar busy={busy} error={t(error)} notice={t(notice)} openAdd={() => setAddOpen(true)} openMcp={() => setMcpOpen(true)} query={query} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
+      <TopBar busy={busy} error={t(error)} notice={t(notice)} openAdd={() => setAddOpen(true)} openMcp={() => setMcpOpen(true)} openRemote={() => setRemoteOpen(true)} query={query} remote={config.remote} setQuery={setQuery} save={save} setUrl={setUrl} url={url} />
       <TrendingTicker busy={busy} error={trendingError} onSave={saveTrending} repos={trending} />
       <div className="viewbar">
         <div className="viewbar-tools">
@@ -552,6 +554,7 @@ function App() {
         />
       )}
       {mcpOpen && <McpDialog onClose={() => setMcpOpen(false)} />}
+      {remoteOpen && <RemoteDialog onClose={() => setRemoteOpen(false)} />}
     </main>
   );
 }
@@ -560,7 +563,7 @@ function looksLikeRepoUrl(text) {
   return /github\.com[/:][^/\s]+\/[^/\s]+/i.test(text || "");
 }
 
-function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, setUrl, url }) {
+function TopBar({ busy, error, notice, openAdd, openMcp, openRemote, query, remote, save, setQuery, setUrl, url }) {
   const autoPasteFromClipboard = async () => {
     if (url.trim()) return; // niet overschrijven wat er al staat
     try {
@@ -586,6 +589,11 @@ function TopBar({ busy, error, notice, openAdd, openMcp, query, save, setQuery, 
         <button className="mcp-chip" onClick={openMcp} title={t("MCP-server: koppel Claude Code, Codex of een andere agent")} type="button">
           <span /> MCP
         </button>
+        {!remote && (
+          <button className="mcp-chip remote-chip" onClick={openRemote} title={t("Op afstand: bedien de app vanaf je telefoon of tablet (QR-code)")} type="button">
+            <Smartphone size={12} /> {t("Telefoon")}
+          </button>
+        )}
       </div>
       <form className="save-form" onSubmit={save}>
         <input
@@ -1305,6 +1313,95 @@ function TerminalDock({ onClose, repo }) {
         </>
       )}
     </aside>
+  );
+}
+
+// Remote mode: pair a phone/tablet (or another PC) with this running app.
+// The server only hands out the QR code / link over loopback, so this dialog
+// never renders for a remote viewer (the chip is hidden there).
+function RemoteDialog({ onClose }) {
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  useEffect(() => {
+    loadRemote().then(setStatus).catch((err) => setError(err.message));
+  }, []);
+
+  const update = async (patch) => {
+    setBusy(true);
+    setError("");
+    try {
+      setStatus(await updateRemote(patch));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async (label, value) => {
+    try {
+      await navigator.clipboard?.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(""), 1800);
+    } catch {
+      setError(t("Kopiëren naar het klembord lukte niet — selecteer de tekst handmatig."));
+    }
+  };
+  const urls = status?.urls || [];
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-label={t("Op afstand")} className="clone-modal remote-modal" role="dialog">
+        <div className="modal-head">
+          <div>
+            <h2>{t("Repo Notebook op je telefoon")}</h2>
+            <p>{t("Bedien deze app vanaf je iPhone, iPad of een andere computer: scan de QR-code, zet hem op je beginscherm en je hebt dezelfde plank, Snelstart en logs in je zak. Klonen en draaien gebeurt gewoon hier, op deze computer.")}</p>
+          </div>
+          <button aria-label={t("Sluit venster")} className="icon" onClick={onClose}><X size={18} /></button>
+        </div>
+        {error && <div className="clone-error">{t(error)}</div>}
+        {!status && !error && <div className="mcp-loading"><Loader2 className="spin" size={18} />{" "}{t("Status laden…")}</div>}
+        {status && (
+          <>
+            <label className="remote-toggle">
+              <input checked={status.enabled} disabled={busy} onChange={(event) => update({ enabled: event.target.checked })} type="checkbox" />
+              <span>
+                {status.enabled
+                  ? t("Aan — bereikbaar op poort {0} voor apparaten met de toegangscode", [String(status.port)])
+                  : t("Uit — alleen deze computer kan erbij")}
+              </span>
+            </label>
+            {status.enabled && status.error && <div className="clone-error">{t(status.error)}</div>}
+            {status.enabled && status.listening && (
+              <>
+                {urls.length === 0 && <div className="mcp-note">{t("Geen netwerkadres gevonden — verbind met wifi of Tailscale.")}</div>}
+                <div className="remote-urls">
+                  {urls.map((entry) => (
+                    <div className="remote-url" key={entry.address}>
+                      <img alt={t("QR-code voor {0}", [entry.base])} src={`/api/remote/qr.svg?target=${encodeURIComponent(entry.url)}`} />
+                      <div>
+                        <strong>{entry.kind === "tailscale" ? "Tailscale" : t("Wifi / LAN")} · {entry.interface}</strong>
+                        <code>{entry.base}</code>
+                        <button onClick={() => copy(entry.address, entry.url)} type="button">
+                          {copied === entry.address ? t("Gekopieerd") : t("Kopieer koppellink")}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mcp-note">{t("Scan de QR-code met de camera van je telefoon (zelfde wifi, of overal via Tailscale). Open daarna in Safari het deelmenu → 'Zet op beginscherm': de app onthoudt de koppeling zelf.")}</div>
+              </>
+            )}
+            <div className="remote-foot">
+              <button disabled={busy} onClick={() => update({ regenerate: true })} type="button">{t("Nieuwe toegangscode")}</button>
+              <span>{t("De toegangscode geeft volledige controle (klonen, installeren, starten). Deel hem niet; via Tailscale blijft hij binnen je eigen apparaten.")}</span>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
   );
 }
 
